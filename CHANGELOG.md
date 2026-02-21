@@ -2,6 +2,15 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.0.6] - 2026-02-21
+
+### Added
+- 新增 `astrbot_version` 元数据字段：声明最低 AstrBot 版本要求 (>=4.9.2)
+- 新增 `support_platforms` 元数据字段：声明支持的平台（空数组表示全平台支持）
+
+### Changed
+- 适配 AstrBot PR #5235 插件元数据规范，支持版本兼容性检查
+
 ## [1.0.5] - 2026-02-12
 
 ### Added
