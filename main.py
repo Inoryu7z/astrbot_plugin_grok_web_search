@@ -20,6 +20,7 @@ import time
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.core.star.filter.command import GreedyStr
 from astrbot.api.star import Context, Star
 from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.provider.func_tool_manager import FunctionToolManager
@@ -676,7 +677,7 @@ class GrokSearchPlugin(Star):
         )
 
     @filter.command("grok")
-    async def grok_cmd(self, event: AstrMessageEvent, query: str = ""):
+    async def grok_cmd(self, event: AstrMessageEvent, query: GreedyStr = ""):
         """执行 Grok 搜索
 
         用法: /grok <搜索内容>

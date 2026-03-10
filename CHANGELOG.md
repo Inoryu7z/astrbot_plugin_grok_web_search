@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.0.9] - 2026-03-11
+
+### Fixed
+- 修复 `/grok` 指令关键词含空格时只取第一个词的问题（如 `/grok 1 2 3` 只搜索 `1`）
+- 使用 AstrBot 框架的 `GreedyStr` 类型捕获命令后的完整文本
+
 ## [1.0.8] - 2026-03-08
 
 ### Changed
