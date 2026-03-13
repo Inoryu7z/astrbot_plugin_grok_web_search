@@ -20,6 +20,50 @@
 <details>
 <summary>历史版本</summary>
 
+## [1.0.9] - 2026-03-11
+
+### Fixed
+- 修复 `/grok` 指令关键词含空格时只取第一个词的问题（如 `/grok 1 2 3` 只搜索 `1`）
+- 使用 AstrBot 框架的 `GreedyStr` 类型捕获命令后的完整文本
+
+## [1.0.8] - 2026-03-08
+
+### Changed
+- Skill 安装改用 `SkillManager.install_skill_from_zip()` 官方接口，正式注册到 `skills.json` 配置
+- Skill 卸载改用 `SkillManager.delete_skill()` 官方接口，同步清理目录和配置
+- Skill 首次迁移从移动改为复制，插件源目录始终保留原始副本
+- 移除手动路径管理回退逻辑，统一依赖 SkillManager API
+
+## [1.0.7] - 2026-03-04
+
+### Added
+- 新增 JSON 响应降级处理：当内置供应商返回非 JSON 格式时，自动提取纯文本和 URL 作为来源，不再直接报错
+- 新增 `_try_parse_json_response()` 方法：支持解析多种格式（纯 JSON、Markdown 代码块、混合文本中的嵌套 JSON）
+- 新增 `_extract_sources_from_text()` 方法：从非 JSON 文本中提取 URL 作为来源
+
+### Changed
+- `/grok` 指令提示词改为英文指令 + JSON 格式 + 中文回复要求（专有名词保留原文）
+- LLM Tool 和 Skill 提示词保持英文 + JSON 格式（无语言要求）
+- JSON 解析改用 `json.JSONDecoder().raw_decode` 支持嵌套结构，避免正则截断问题
+
+### Fixed
+- 修复混合文本中嵌套 JSON 解析失败的问题
+- 修复内置供应商返回非 JSON 时用户看到"获取到非 JSON 文本"错误的问题
+
+### Security
+- URL 协议白名单校验：仅允许 `http`/`https`，拒绝 `javascript:`、`data:`、`file:` 等协议
+- URL 长度限制：最大 2048 字符
+- URL 控制字符过滤：拒绝包含 ASCII 控制字符的 URL
+- 错误响应检测：识别 rate limit、unauthorized 等错误模式，避免将错误文案误判为成功
+
+## [1.0.6] - 2026-02-21
+
+### Added
+- 新增 `astrbot_version` 元数据字段：声明最低 AstrBot 版本要求 (>=4.9.2)
+- 新增 `support_platforms` 元数据字段：声明支持的平台（空数组表示全平台支持）
+
+### Changed
+- 适配 AstrBot PR #5235 插件元数据规范，支持版本兼容性检查
 
 ## [1.0.5] - 2026-02-12
 

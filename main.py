@@ -8,7 +8,10 @@ AstrBot 插件：Grok 联网搜索
 """
 
 import shutil
+import tempfile
+import zipfile
 from pathlib import Path
+import re
 
 import aiohttp
 import asyncio
@@ -17,6 +20,7 @@ import time
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.core.star.filter.command import GreedyStr
 from astrbot.api.star import Context, Star
 from astrbot.core.message.components import Image
 from astrbot.core.utils.io import download_image_by_url, file_to_base64
@@ -190,15 +194,17 @@ class GrokSearchPlugin(Star):
                 f"[{PLUGIN_NAME}] API 连通性检查超时，请检查 base_url 是否可达"
             )
 
-    def _get_skills_path(self) -> Path:
-        """获取 skills 目录路径"""
+    def _get_skill_manager(self):
+        """获取 SkillManager 实例（延迟导入）"""
+        if hasattr(self, "_skill_mgr"):
+            return self._skill_mgr
         try:
-            from astrbot.core.utils.astrbot_path import get_astrbot_skills_path
+            from astrbot.core.skills import SkillManager
 
-            return Path(get_astrbot_skills_path())
+            self._skill_mgr = SkillManager()
         except ImportError:
-            # 回退到相对路径
-            return Path(__file__).parent.parent.parent / "skills"
+            self._skill_mgr = None
+        return self._skill_mgr
 
     def _get_plugin_data_path(self) -> Path:
         """获取插件持久化数据目录"""
@@ -220,78 +226,69 @@ class GrokSearchPlugin(Star):
         return self._get_plugin_data_path() / "skill"
 
     def _migrate_skill_to_persistent(self):
-        """首次安装：将插件目录的 skill 移动到持久化目录"""
+        """首次安装：将插件目录的 skill 复制到持久化目录"""
         source_dir = Path(__file__).parent / "skill"
         persistent_dir = self._get_skill_persistent_path()
 
-        # 如果插件目录有 skill 且持久化目录没有，则移动
         if source_dir.exists() and not persistent_dir.exists():
             try:
-                shutil.move(str(source_dir), str(persistent_dir))
+                shutil.copytree(source_dir, persistent_dir, symlinks=True)
                 logger.info(
-                    f"[{PLUGIN_NAME}] Skill 已迁移到持久化目录: {persistent_dir}"
+                    f"[{PLUGIN_NAME}] Skill 已复制到持久化目录: {persistent_dir}"
                 )
             except Exception as e:
-                logger.error(f"[{PLUGIN_NAME}] Skill 迁移失败: {e}")
-                # 迁移失败则复制
-                try:
-                    shutil.copytree(source_dir, persistent_dir)
-                    logger.info(
-                        f"[{PLUGIN_NAME}] Skill 已复制到持久化目录: {persistent_dir}"
-                    )
-                except Exception as e2:
-                    logger.error(f"[{PLUGIN_NAME}] Skill 复制也失败: {e2}")
+                logger.error(f"[{PLUGIN_NAME}] Skill 复制到持久化目录失败: {e}")
 
     def _install_skill(self):
-        """从持久化目录安装 Skill 到 skills 目录"""
-        skills_path = self._get_skills_path()
-        target_dir = skills_path / "grok-search"
+        """通过 SkillManager 安装 Skill（打包为 zip 后调用官方接口）"""
         source_dir = self._get_skill_persistent_path()
 
         if not source_dir.exists():
-            logger.warning(f"[{PLUGIN_NAME}] Skill 持久化目录不存在: {source_dir}")
+            logger.error(f"[{PLUGIN_NAME}] Skill 持久化目录不存在: {source_dir}")
             return
 
-        # 安全检查：确保源目录不是 symlink
         if source_dir.is_symlink():
             logger.error(
                 f"[{PLUGIN_NAME}] Skill 源目录是 symlink，拒绝安装: {source_dir}"
             )
             return
 
-        try:
-            skills_path.mkdir(parents=True, exist_ok=True)
-            if target_dir.exists():
-                shutil.rmtree(target_dir)
-            # 使用 symlinks=True 避免跟随 symlink 复制敏感文件
-            shutil.copytree(source_dir, target_dir, symlinks=True)
-            logger.info(f"[{PLUGIN_NAME}] Skill 已安装到 {target_dir}")
-        except Exception as e:
-            logger.error(f"[{PLUGIN_NAME}] Skill 安装失败: {e}")
-
-    def _uninstall_skill(self):
-        """从 skills 目录卸载 Skill，移动回持久化目录"""
-        skills_path = self._get_skills_path()
-        source_dir = skills_path / "grok-search"
-
-        if not source_dir.exists():
+        skill_mgr = self._get_skill_manager()
+        if not skill_mgr:
+            logger.error(f"[{PLUGIN_NAME}] SkillManager 不可用，无法安装 Skill")
             return
 
-        persistent_dir = self._get_skill_persistent_path()
+        tmp_zip = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                tmp_zip = Path(tmp.name)
+
+            with zipfile.ZipFile(tmp_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+                for file in source_dir.rglob("*"):
+                    if file.is_file():
+                        arcname = f"grok-search/{file.relative_to(source_dir)}"
+                        zf.write(file, arcname)
+
+            skill_mgr.install_skill_from_zip(str(tmp_zip), overwrite=True)
+            logger.info(f"[{PLUGIN_NAME}] Skill 已通过 SkillManager 安装并激活")
+        except Exception as e:
+            logger.error(f"[{PLUGIN_NAME}] Skill 安装失败: {e}")
+        finally:
+            if tmp_zip:
+                tmp_zip.unlink(missing_ok=True)
+
+    def _uninstall_skill(self):
+        """通过 SkillManager 卸载 Skill"""
+        skill_mgr = self._get_skill_manager()
+        if not skill_mgr:
+            logger.error(f"[{PLUGIN_NAME}] SkillManager 不可用，无法卸载 Skill")
+            return
 
         try:
-            # 更新持久化目录
-            if persistent_dir.exists():
-                shutil.rmtree(persistent_dir)
-            shutil.move(str(source_dir), str(persistent_dir))
-            logger.info(f"[{PLUGIN_NAME}] Skill 已移动回持久化目录: {persistent_dir}")
+            skill_mgr.delete_skill("grok-search")
+            logger.info(f"[{PLUGIN_NAME}] Skill 已通过 SkillManager 卸载")
         except Exception as e:
-            logger.error(f"[{PLUGIN_NAME}] Skill 移动失败: {e}")
-            # 移动失败则直接删除
-            try:
-                shutil.rmtree(source_dir)
-            except Exception:
-                pass
+            logger.error(f"[{PLUGIN_NAME}] Skill 卸载失败: {e}")
 
     def _parse_json_config(self, key: str) -> dict:
         """解析 JSON 格式的配置项"""
@@ -398,29 +395,20 @@ class GrokSearchPlugin(Star):
                     )
 
                     text = llm_resp.completion_text or ""
-                    try:
-                        parsed = json.loads(text)
+                    usage = {}
+                    if llm_resp.usage:
+                        usage = {
+                            "prompt_tokens": llm_resp.usage.input,
+                            "completion_tokens": llm_resp.usage.output,
+                            "total_tokens": llm_resp.usage.total,
+                        }
+
+                    # 尝试解析 JSON 格式响应
+                    parsed = self._try_parse_json_response(text)
+                    if parsed is not None:
                         content = str(parsed.get("content", ""))
                         raw_sources = parsed.get("sources", [])
-                        # 归一化 sources 结构
-                        sources = []
-                        if isinstance(raw_sources, list):
-                            for item in raw_sources:
-                                if isinstance(item, dict) and item.get("url"):
-                                    sources.append(
-                                        {
-                                            "url": str(item.get("url")),
-                                            "title": str(item.get("title") or ""),
-                                            "snippet": str(item.get("snippet") or ""),
-                                        }
-                                    )
-                        usage = {}
-                        if llm_resp.usage:
-                            usage = {
-                                "prompt_tokens": llm_resp.usage.input,
-                                "completion_tokens": llm_resp.usage.output,
-                                "total_tokens": llm_resp.usage.total,
-                            }
+                        sources = self._normalize_sources(raw_sources)
                         return {
                             "ok": True,
                             "content": content,
@@ -428,14 +416,57 @@ class GrokSearchPlugin(Star):
                             "elapsed_ms": int((time.time() - started) * 1000),
                             "retries": attempts,
                             "usage": usage,
-                            "raw": text,
+                            "raw": "",
                         }
-                    except Exception:
+
+                    # JSON 解析失败，降级处理：提取纯文本和 URL
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] 内置供应商返回非 JSON 格式，使用降级处理"
+                    )
+
+                    # 检测典型错误模式，避免将错误文案误判为成功
+                    text_lower = text.lower()
+                    error_patterns = [
+                        "rate limit",
+                        "too many requests",
+                        "quota exceeded",
+                        "authentication failed",
+                        "invalid api key",
+                        "unauthorized",
+                        "service unavailable",
+                        "internal server error",
+                        "timeout",
+                        "connection refused",
+                    ]
+                    is_error_response = any(p in text_lower for p in error_patterns)
+
+                    if not text.strip() or is_error_response:
+                        error_msg = (
+                            "提供商返回空响应"
+                            if not text.strip()
+                            else f"提供商返回错误: {text[:200]}"
+                        )
                         return {
                             "ok": False,
-                            "error": "提供商返回内容不是有效的 JSON",
-                            "raw": text,
+                            "error": error_msg,
+                            "content": "",
+                            "sources": [],
+                            "elapsed_ms": int((time.time() - started) * 1000),
+                            "retries": attempts,
+                            "usage": usage,
+                            "raw": text[:500] if text else "",
                         }
+
+                    sources = self._extract_sources_from_text(text)
+                    return {
+                        "ok": True,
+                        "content": text,
+                        "sources": sources,
+                        "elapsed_ms": int((time.time() - started) * 1000),
+                        "retries": attempts,
+                        "usage": usage,
+                        "raw": text,
+                    }
 
                 except Exception as e:
                     last_exc = e
@@ -547,7 +578,124 @@ class GrokSearchPlugin(Star):
                 if snippet:
                     lines.append(f"     {snippet}")
 
+        # 提示主 LLM 使用纯文本格式回复用户
+        lines.append("\n[提示: 请使用纯文本格式回复用户，不要使用 Markdown 格式]")
+
         return "\n".join(lines)
+
+    def _try_parse_json_response(self, text: str) -> dict | None:
+        """尝试解析 JSON 响应，支持多种格式
+
+        支持的格式：
+        1. 纯 JSON 对象
+        2. Markdown 代码块包裹的 JSON
+        3. 混合文本中的 JSON（支持嵌套结构）
+        """
+
+        if not text or not text.strip():
+            return None
+
+        text = text.strip()
+
+        # 尝试直接解析
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+
+        # 尝试提取 Markdown 代码块中的 JSON
+        code_block_pattern = r"```(?:json)?\s*\n?([\s\S]*?)\n?```"
+        matches = re.findall(code_block_pattern, text)
+        for match in matches:
+            try:
+                parsed = json.loads(match.strip())
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                continue
+
+        # 使用 JSONDecoder.raw_decode 从每个 { 起点尝试解码（支持嵌套结构）
+        decoder = json.JSONDecoder()
+        start_idx = 0
+        max_attempts = 10  # 限制尝试次数
+
+        while start_idx < len(text) and max_attempts > 0:
+            brace_pos = text.find("{", start_idx)
+            if brace_pos == -1:
+                break
+
+            try:
+                parsed, end_idx = decoder.raw_decode(text, idx=brace_pos)
+                if isinstance(parsed, dict) and (
+                    "content" in parsed or "sources" in parsed
+                ):
+                    return parsed
+                start_idx = end_idx
+            except json.JSONDecodeError:
+                start_idx = brace_pos + 1
+
+            max_attempts -= 1
+
+        return None
+
+    def _normalize_sources(self, raw_sources: list) -> list[dict[str, str]]:
+        """归一化 sources 结构，仅允许 http/https 协议"""
+        from urllib.parse import urlparse
+
+        sources = []
+        if isinstance(raw_sources, list):
+            for item in raw_sources:
+                if isinstance(item, dict) and item.get("url"):
+                    url = str(item.get("url", ""))
+                    # URL 协议白名单校验
+                    try:
+                        parsed = urlparse(url)
+                        if parsed.scheme not in ("http", "https"):
+                            continue
+                        # 限制长度和过滤控制字符
+                        if len(url) > 2048 or any(ord(c) < 32 for c in url):
+                            continue
+                    except Exception:
+                        continue
+
+                    sources.append(
+                        {
+                            "url": url,
+                            "title": str(item.get("title") or ""),
+                            "snippet": str(item.get("snippet") or ""),
+                        }
+                    )
+        return sources
+
+    def _extract_sources_from_text(self, text: str) -> list[dict[str, str]]:
+        """从文本中提取 URL 作为来源，仅允许 http/https 协议"""
+        from urllib.parse import urlparse
+
+        sources = []
+        url_pattern = r"https://[^\s)\]}>\"']+|http://[^\s)\]}>\"']+"
+        seen: set[str] = set()
+
+        for match in re.finditer(url_pattern, text):
+            url = match.group().rstrip(".,;:!?\"'")
+            if not url or url in seen:
+                continue
+            # URL 校验
+            try:
+                parsed = urlparse(url)
+                if parsed.scheme not in ("http", "https"):
+                    continue
+                if len(url) > 2048 or any(ord(c) < 32 for c in url):
+                    continue
+            except Exception:
+                continue
+
+            seen.add(url)
+            sources.append({"url": url, "title": "", "snippet": ""})
+
+        return sources
 
     def _help_text(self) -> str:
         """返回帮助文本"""
@@ -595,7 +743,7 @@ class GrokSearchPlugin(Star):
         )
 
     @filter.command("grok")
-    async def grok_cmd(self, event: AstrMessageEvent, query: str = ""):
+    async def grok_cmd(self, event: AstrMessageEvent, query: GreedyStr = ""):
         """执行 Grok 搜索
 
         用法: /grok <搜索内容>
@@ -627,21 +775,20 @@ class GrokSearchPlugin(Star):
 
         # 仅有图片无文本时，使用默认提示词
         if not query.strip() and images:
-            query = "请描述这张图片的内容"
+            query = "请搜索这张图片的内容"
 
-        # 优先使用自定义提示词，未设置则使用内置中文提示词
+        # 优先使用自定义提示词，未设置则使用内置提示词（英文指令 + JSON 格式 + 中文回复）
         custom_prompt = self.config.get("custom_system_prompt", "")
         if custom_prompt and isinstance(custom_prompt, str) and custom_prompt.strip():
             cmd_system_prompt = custom_prompt.strip()
         else:
             cmd_system_prompt = (
-                "你是一个网络研究助手。请使用实时网络搜索/浏览来回答问题。"
-                "请务必使用中文回复。"
-                "如果有专有名词或技术术语，可以直接使用原词，或者在中文旁边加个方括号把原词写在里面，例如：人工智能[AI]。"
-                "只返回一个 JSON 对象，包含以下字段："
-                "content（字符串，综合答案），sources（数组，包含 url/title/snippet 的来源对象）。"
-                "内容要简洁且有据可依。"
-                "重要：content 字段中不要使用 Markdown 格式，只使用纯文本。"
+                "You are a web research assistant. Use live web search/browsing when answering. "
+                "Return ONLY a single JSON object with keys: "
+                "content (string), sources (array of objects with url/title/snippet when possible). "
+                "Keep content concise and evidence-backed. "
+                "IMPORTANT: Respond in Chinese. Do NOT use Markdown formatting in the content field - use plain text only. "
+                "Keep proper nouns and names in their original language."
             )
 
         result = await self._do_search(
