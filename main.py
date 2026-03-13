@@ -18,6 +18,7 @@ import time
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star
+from astrbot.core.message.components import Image, Node, Nodes, Plain, Reply
 from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.provider.func_tool_manager import FunctionToolManager
 
@@ -50,6 +51,62 @@ class GrokSearchPlugin(Star):
         super().__init__(context)
         self.config = config or {}
         self._session: aiohttp.ClientSession | None = None
+
+    async def _extract_content_from_event(
+        self, event: AstrMessageEvent
+    ) -> tuple[list[str], list[str]]:
+        """Extract text and images from the user's message.
+
+        Handles three message patterns:
+        - Direct Image/Plain components in the message chain
+        - Content inside Reply.chain (quoted/replied messages)
+        - Content inside Node/Nodes.content (QQ forwarded messages, recursive)
+
+        Returns:
+            A tuple of (texts, images):
+            - texts: list of text strings from nested components (Reply/Node/Nodes)
+            - images: list of base64-encoded image strings (without prefix)
+        """
+        texts: list[str] = []
+        images: list[str] = []
+        await self._collect_content_from_chain(event.get_messages(), texts, images)
+        return texts, images
+
+    async def _collect_content_from_chain(
+        self,
+        chain: list,
+        texts: list[str],
+        images: list[str],
+    ) -> None:
+        """Recursively collect text and images from a message component chain."""
+        if not chain:
+            return
+        for comp in chain:
+            if isinstance(comp, Image):
+                try:
+                    b64 = await comp.convert_to_base64()
+                    if b64:
+                        images.append(b64)
+                except Exception as e:
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] Failed to convert image to base64: {e}"
+                    )
+            elif isinstance(comp, Plain):
+                if comp.text and comp.text.strip():
+                    texts.append(comp.text.strip())
+            elif isinstance(comp, Reply):
+                if comp.chain:
+                    await self._collect_content_from_chain(comp.chain, texts, images)
+            elif isinstance(comp, Node):
+                if comp.content:
+                    await self._collect_content_from_chain(comp.content, texts, images)
+            elif isinstance(comp, Nodes):
+                if comp.nodes:
+                    for node in comp.nodes:
+                        if node.content:
+                            await self._collect_content_from_chain(
+                                node.content, texts, images
+                            )
 
     async def initialize(self):
         """插件初始化：验证配置并处理 Skill 安装"""
@@ -253,13 +310,15 @@ class GrokSearchPlugin(Star):
         query: str,
         system_prompt: str | None = None,
         use_retry: bool = False,
+        images: list[str] | None = None,
     ) -> dict:
-        """执行搜索
+        """Execute a search.
 
         Args:
-            query: 搜索查询内容
-            system_prompt: 自定义系统提示词，为 None 时使用默认提示词
-            use_retry: 是否启用重试功能（仅指令调用时启用）
+            query: Search query content
+            system_prompt: Custom system prompt, uses default when None
+            use_retry: Whether to enable retry (command invocation only)
+            images: Optional list of base64-encoded images for multimodal queries
         """
         # 安全解析 timeout 配置
         try:
@@ -326,10 +385,16 @@ class GrokSearchPlugin(Star):
 
                     provider_id = prov.meta().id
 
+                    # Build image_urls for builtin provider from base64
+                    image_urls = (
+                        [f"base64://{img}" for img in images] if images else None
+                    )
+
                     llm_resp = await self.context.llm_generate(
                         chat_provider_id=provider_id,
                         prompt=query,
                         system_prompt=system_prompt,
+                        image_urls=image_urls,
                     )
 
                     text = llm_resp.completion_text or ""
@@ -396,6 +461,7 @@ class GrokSearchPlugin(Star):
                 max_retries=max_retries,
                 retry_delay=retry_delay,
                 retryable_status_codes=retryable_status_codes,
+                images=images,
             )
         except Exception as e:
             logger.error(f"[{PLUGIN_NAME}] API 调用异常: {e}")
@@ -538,6 +604,20 @@ class GrokSearchPlugin(Star):
             yield event.plain_result(self._help_text())
             return
 
+        # Extract text and images from user's message (including Reply/Node/Nodes)
+        extra_texts, images = await self._extract_content_from_event(event)
+        if images:
+            logger.info(
+                f"[{PLUGIN_NAME}] /grok command: extracted {len(images)} image(s) from message"
+            )
+
+        # Prepend extracted text context from Reply/Node/Nodes to the query
+        if extra_texts:
+            context_text = "\n".join(extra_texts)
+            query = (
+                f"[Referenced message content]\n{context_text}\n\n[User query]\n{query}"
+            )
+
         # 优先使用自定义提示词，未设置则使用内置中文提示词
         custom_prompt = self.config.get("custom_system_prompt", "")
         if custom_prompt and isinstance(custom_prompt, str) and custom_prompt.strip():
@@ -557,6 +637,7 @@ class GrokSearchPlugin(Star):
             query,
             system_prompt=cmd_system_prompt,
             use_retry=True,
+            images=images or None,
         )
         event.should_call_llm(True)
         try:
@@ -571,15 +652,65 @@ class GrokSearchPlugin(Star):
                 pass
 
     @filter.llm_tool(name="grok_web_search")
-    async def grok_tool(self, event: AstrMessageEvent, query: str) -> str:
-        """通过 Grok 进行实时联网搜索，获取最新信息和来源
+    async def grok_tool(
+        self,
+        event: AstrMessageEvent,
+        query: str,
+        image_urls: str = "",
+    ) -> str:
+        """通过 Grok 进行实时联网搜索，获取最新信息和来源。支持传入图片进行多模态搜索。
 
         当需要搜索实时信息、最新新闻、API 版本、错误解决方案或验证过时/不确定信息时使用。
+        如果用户消息中包含图片，也会自动提取图片进行多模态搜索。
 
         Args:
             query(string): 搜索查询内容，应该是清晰具体的问题或关键词
+            image_urls(string): 可选，逗号分隔的图片 URL 或 base64:// 链接
         """
-        result = await self._do_search(query, use_retry=False)
+        # Collect images: from LLM-provided image_urls param + from user's message
+        images: list[str] = []
+
+        # 1. Parse image_urls provided by LLM
+        if image_urls and isinstance(image_urls, str):
+            for url in image_urls.split(","):
+                url = url.strip()
+                if not url:
+                    continue
+                if url.startswith("base64://"):
+                    images.append(url.removeprefix("base64://"))
+                elif url.startswith("http"):
+                    # Download and convert to base64
+                    try:
+                        from astrbot.core.utils.io import download_image_by_url
+                        from astrbot.core.utils.io import file_to_base64
+
+                        file_path = await download_image_by_url(url)
+                        b64 = file_to_base64(file_path)
+                        b64 = b64.removeprefix("base64://")
+                        if b64:
+                            images.append(b64)
+                    except Exception as e:
+                        logger.warning(
+                            f"[{PLUGIN_NAME}] Failed to download image from URL {url}: {e}"
+                        )
+
+        # 2. Auto-extract content from user's message event
+        extra_texts, event_images = await self._extract_content_from_event(event)
+        images.extend(event_images)
+
+        # Prepend extracted text context from Reply/Node/Nodes to the query
+        if extra_texts:
+            context_text = "\n".join(extra_texts)
+            query = (
+                f"[Referenced message content]\n{context_text}\n\n[User query]\n{query}"
+            )
+
+        if images:
+            logger.info(
+                f"[{PLUGIN_NAME}] grok_web_search tool: processing with {len(images)} image(s)"
+            )
+
+        result = await self._do_search(query, use_retry=False, images=images or None)
         return self._format_result_for_llm(result)
 
     @filter.on_llm_request()
