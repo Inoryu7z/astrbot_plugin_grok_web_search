@@ -19,6 +19,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star
 from astrbot.core.message.components import Image
+from astrbot.core.utils.io import download_image_by_url, file_to_base64
 from astrbot.core.utils.quoted_message.chain_parser import (
     _extract_image_refs_from_component_chain,
     _extract_text_from_component_chain,
@@ -77,13 +78,15 @@ class GrokSearchPlugin(Star):
         # 使用本体的 chain_parser 提取图片引用，再转为 base64
         image_refs = _extract_image_refs_from_component_chain(chain)
         images: list[str] = []
+        seen: set[str] = set()
 
         # 提取消息链顶层的 Image 组件并转为 base64
         for comp in chain:
             if isinstance(comp, Image):
                 try:
                     b64 = await comp.convert_to_base64()
-                    if b64:
+                    if b64 and b64 not in seen:
+                        seen.add(b64)
                         images.append(b64)
                 except Exception as e:
                     logger.warning(
@@ -95,7 +98,8 @@ class GrokSearchPlugin(Star):
             try:
                 img = Image.fromURL(ref)
                 b64 = await img.convert_to_base64()
-                if b64:
+                if b64 and b64 not in seen:
+                    seen.add(b64)
                     images.append(b64)
             except Exception as e:
                 logger.warning(
@@ -688,9 +692,6 @@ class GrokSearchPlugin(Star):
                 elif url.startswith("http"):
                     # 下载并转为 base64
                     try:
-                        from astrbot.core.utils.io import download_image_by_url
-                        from astrbot.core.utils.io import file_to_base64
-
                         file_path = await download_image_by_url(url)
                         b64 = file_to_base64(file_path)
                         b64 = b64.removeprefix("base64://")

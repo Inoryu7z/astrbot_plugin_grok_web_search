@@ -259,7 +259,7 @@ def _request_chat_completions(
             user_content.append(
                 {
                     "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+                    "image_url": {"url": f"data:image/*;base64,{img_b64}"},
                 }
             )
         user_message: dict[str, Any] = {"role": "user", "content": user_content}
