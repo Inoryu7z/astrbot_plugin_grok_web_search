@@ -2,6 +2,18 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.2.1] - 2026-03-17
+
+### Added
+- **x_search 工具**：新增 X/Twitter 平台搜索支持
+  - 同时启用 `web_search` 和 `x_search` 两个工具
+  - 模型会自动判断使用哪个工具（搜索网页内容用 web_search，搜索推特内容用 x_search）
+  - 可以搜索 X 平台的帖子、用户、话题等内容
+
+### Fixed
+- 修复图片输入格式：使用 `image/jpeg` MIME 类型替代 `image/*`
+- 添加 `detail: "high"` 参数以获得更好的图片理解效果
+
 ## [1.2.0] - 2026-03-17
 
 ### Fixed
