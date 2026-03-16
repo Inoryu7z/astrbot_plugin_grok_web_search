@@ -206,14 +206,17 @@ async def grok_search(
         user_input = query
 
     # 构建 Responses API 请求体
+    # 启用多个搜索工具：web_search (网页搜索) + x_search (X/Twitter 搜索)
     body: dict[str, Any] = {
         "model": model,
         "input": [
             {"role": "system", "content": final_system_prompt},
             {"role": "user", "content": user_input},
         ],
-        # 启用 web_search 工具实现真正的联网搜索
-        "tools": [{"type": "web_search"}],
+        "tools": [
+            {"type": "web_search"},
+            {"type": "x_search"},
+        ],
     }
 
     if extra_body:
