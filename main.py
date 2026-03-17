@@ -76,7 +76,7 @@ class GrokSearchPlugin(Star):
         try:
             if get_astrbot_data_path:
                 font_dir = str(
-                    get_astrbot_data_path() / "plugin_data" / PLUGIN_NAME / "font"
+                    Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME / "font"
                 )
             else:
                 font_dir = os.path.join(os.path.dirname(__file__), "font")
