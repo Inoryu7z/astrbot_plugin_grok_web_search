@@ -16,6 +16,7 @@ import re
 import aiohttp
 import asyncio
 import json
+import os
 import time
 
 from astrbot.api import logger
@@ -28,15 +29,28 @@ from astrbot.core.utils.quoted_message.chain_parser import (
     _extract_image_refs_from_component_chain,
     _extract_text_from_component_chain,
 )
-from astrbot.core.provider.entities import ProviderRequest
-from astrbot.core.provider.func_tool_manager import FunctionToolManager
 
-from .grok_client import (
+from .api.grok_chat import grok_fetch, grok_search
+from .api.grok_responses import grok_responses_search
+
+try:
+    from astrbot.core.provider.register import llm_tools as _llm_tools_registry
+except ImportError:
+    _llm_tools_registry = None
+try:
+    from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+except ImportError:
+    get_astrbot_data_path = None
+from .tool.tool import (
     DEFAULT_JSON_SYSTEM_PROMPT,
-    grok_search,
     normalize_api_key,
     normalize_base_url,
     parse_json_config,
+)
+from .tool.card_render import (
+    render_search_card,
+    init_fonts,
+    set_logger as set_card_logger,
 )
 
 PLUGIN_NAME = "astrbot_plugin_grok_web_search"
@@ -60,6 +74,7 @@ class GrokSearchPlugin(Star):
         super().__init__(context)
         self.config = config or {}
         self._session: aiohttp.ClientSession | None = None
+        self._card_fonts_ready = False
 
     async def _extract_content_from_event(
         self, event: AstrMessageEvent
@@ -112,8 +127,52 @@ class GrokSearchPlugin(Star):
 
         return text, images
 
+    def _unregister_disabled_tools(self):
+        """根据配置在初始化时直接卸载不需要的 LLM Tool，避免 AI 看到无用工具"""
+        if _llm_tools_registry is None:
+            return
+
+        if self.config.get("enable_skill", False):
+            # Skill 接管，移除所有 LLM Tool
+            _llm_tools_registry.remove_func("grok_web_search")
+            _llm_tools_registry.remove_func("grok_web_fetch")
+            logger.info(
+                f"[{PLUGIN_NAME}] Skill 已启用，已卸载 grok_web_search 和 grok_web_fetch 工具"
+            )
+            return
+
+        if not self.config.get("enable_fetch", False):
+            _llm_tools_registry.remove_func("grok_web_fetch")
+            logger.info(f"[{PLUGIN_NAME}] 网页抓取未启用，已卸载 grok_web_fetch 工具")
+
+    def _init_fonts(self):
+        """Initialize card rendering fonts (runs in background)."""
+        logger.info(f"[{PLUGIN_NAME}] 正在后台初始化卡片渲染字体 ...")
+        try:
+            if get_astrbot_data_path:
+                font_dir = str(
+                    Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME / "font"
+                )
+            else:
+                font_dir = os.path.join(os.path.dirname(__file__), "font")
+            set_card_logger(logger)
+            self._card_fonts_ready = init_fonts(font_dir)
+            if self._card_fonts_ready:
+                logger.info(f"[{PLUGIN_NAME}] 卡片渲染字体已就绪: {font_dir}")
+            else:
+                logger.warning(f"[{PLUGIN_NAME}] 卡片渲染字体初始化失败")
+        except Exception as e:
+            logger.warning(f"[{PLUGIN_NAME}] 字体初始化异常: {e}")
+
     async def initialize(self):
         """插件初始化：验证配置并处理 Skill 安装"""
+        # 在后台初始化字体，仅在开启图片渲染模式下
+        if self.config.get("render_as_image", False):
+            asyncio.get_event_loop().run_in_executor(None, self._init_fonts)
+
+        # 根据配置卸载不需要的 LLM Tool
+        self._unregister_disabled_tools()
+
         # 如果启用使用 AstrBot 自带供应商，则推迟创建会话和 Skill 安装
         if self.config.get("use_builtin_provider", False):
             logger.info(
@@ -160,12 +219,17 @@ class GrokSearchPlugin(Star):
             for key, value in extra_headers.items():
                 if str(key).lower() not in protected:
                     headers[str(key)] = str(value)
+
+        # 获取代理配置
+        proxy = self.config.get("proxy", "").strip() or None
+
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     models_url,
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=10),
+                    proxy=proxy,
                 ) as resp:
                     if resp.status == 401:
                         logger.warning(
@@ -477,23 +541,48 @@ class GrokSearchPlugin(Star):
 
         # 否则使用 HTTP 客户端向外部 Grok API 发起请求
         try:
-            result = await grok_search(
-                query=query,
-                base_url=self.config.get("base_url", ""),
-                api_key=self.config.get("api_key", ""),
-                model=self.config.get("model", "grok-4-fast"),
-                timeout=timeout,
-                enable_thinking=self.config.get("enable_thinking", True),
-                thinking_budget=thinking_budget,
-                extra_body=self._parse_json_config("extra_body"),
-                extra_headers=self._parse_json_config("extra_headers"),
-                session=self._session,
-                system_prompt=system_prompt,
-                max_retries=max_retries,
-                retry_delay=retry_delay,
-                retryable_status_codes=retryable_status_codes,
-                images=images,
-            )
+            # 获取代理配置
+            proxy = self.config.get("proxy", "").strip() or None
+
+            # 根据配置选择 API 模式
+            if self.config.get("use_responses_api", False):
+                # 使用 xAI Responses API（/v1/responses）
+                result = await grok_responses_search(
+                    query=query,
+                    base_url=self.config.get("base_url", ""),
+                    api_key=self.config.get("api_key", ""),
+                    model=self.config.get("model", "grok-4-fast"),
+                    timeout=timeout,
+                    extra_body=self._parse_json_config("extra_body"),
+                    extra_headers=self._parse_json_config("extra_headers"),
+                    session=self._session,
+                    system_prompt=system_prompt,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay,
+                    retryable_status_codes=retryable_status_codes,
+                    images=images,
+                    proxy=proxy,
+                )
+            else:
+                # 使用 Chat Completions API（/v1/chat/completions）
+                result = await grok_search(
+                    query=query,
+                    base_url=self.config.get("base_url", ""),
+                    api_key=self.config.get("api_key", ""),
+                    model=self.config.get("model", "grok-4-fast"),
+                    timeout=timeout,
+                    enable_thinking=self.config.get("enable_thinking", True),
+                    thinking_budget=thinking_budget,
+                    extra_body=self._parse_json_config("extra_body"),
+                    extra_headers=self._parse_json_config("extra_headers"),
+                    session=self._session,
+                    system_prompt=system_prompt,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay,
+                    retryable_status_codes=retryable_status_codes,
+                    images=images,
+                    proxy=proxy,
+                )
         except Exception as e:
             logger.error(f"[{PLUGIN_NAME}] API 调用异常: {e}")
             return {"ok": False, "error": f"API 调用异常: {e}"}
@@ -798,16 +887,68 @@ class GrokSearchPlugin(Star):
             images=images or None,
         )
         event.should_call_llm(True)
-        try:
-            await event.send(MessageChain().message(self._format_result(result)))
-        except Exception as e:
-            logger.warning(f"[{PLUGIN_NAME}] 发送搜索结果失败: {e}")
+
+        # 判断是否以图片卡片形式发送
+        use_image = self.config.get("render_as_image", False) and self._card_fonts_ready
+        image_sent = False
+
+        if use_image and result.get("ok"):
+            content = result.get("content", "")
+            sources = result.get("sources", [])
+            elapsed = result.get("elapsed_ms", 0)
+            usage = result.get("usage") or {}
+            total_tokens = usage.get("total_tokens", 0)
+            model = self.config.get("model", "")
+            theme = self.config.get("card_theme", "auto")
+
+            import tempfile
+
+            tmp_path = None
             try:
-                await event.send(
-                    MessageChain().message("搜索完成，但消息发送失败，请重试。")
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                    tmp_path = tmp.name
+                render_search_card(
+                    content=content,
+                    model=model,
+                    elapsed_ms=elapsed,
+                    total_tokens=total_tokens,
+                    output_path=tmp_path,
+                    theme=theme,
                 )
-            except Exception:
-                pass
+                await event.send(MessageChain().file_image(tmp_path))
+                image_sent = True
+            except Exception as e:
+                logger.warning(f"[{PLUGIN_NAME}] 图片卡片发送失败，降级为文本: {e}")
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+
+            # 来源链接单独以文本发送（可点击/复制）
+            if image_sent:
+                show_sources = self.config.get("show_sources", False)
+                max_sources = self.config.get("max_sources", 5)
+                if show_sources and sources:
+                    if max_sources > 0:
+                        sources = sources[:max_sources]
+                    src_lines = ["来源:"]
+                    for i, src in enumerate(sources, 1):
+                        url = src.get("url", "")
+                        title = src.get("title", "")
+                        if title:
+                            src_lines.append(f"  {i}. {title}\n     {url}")
+                        else:
+                            src_lines.append(f"  {i}. {url}")
+                    try:
+                        await event.send(MessageChain().message("\n".join(src_lines)))
+                    except Exception as e:
+                        logger.warning(f"[{PLUGIN_NAME}] 来源链接发送失败: {e}")
+
+        # 文本模式或图片发送失败时降级
+        if not image_sent:
+            try:
+                await event.send(MessageChain().message(self._format_result(result)))
+            except Exception as e:
+                logger.warning(f"[{PLUGIN_NAME}] 发送搜索结果失败: {e}")
 
     @filter.llm_tool(name="grok_web_search")
     async def grok_tool(
@@ -816,14 +957,21 @@ class GrokSearchPlugin(Star):
         query: str,
         image_urls: str = "",
     ) -> str:
-        """通过 Grok 进行实时联网搜索，获取最新信息和来源。支持传入图片进行多模态搜索。
+        """实时联网搜索工具。搜索互联网和 X（Twitter）平台获取最新、准确的信息并返回搜索结果和来源链接。
 
-        当需要搜索实时信息、最新新闻、API 版本、错误解决方案或验证过时/不确定信息时使用。
-        如果用户消息中包含图片，也会自动提取图片进行多模态搜索。
+        何时使用：
+        - 用户询问实时信息、最新动态、新闻事件、天气、股价等时效性内容
+        - 需要验证事实准确性或你对某个信息不确定时
+        - 用户明确要求搜索或查询
+        - 问题涉及你训练数据截止日期之后的内容
+        - 需要获取特定网址、产品、人物的最新状态
+        - 需要查找 X（Twitter）上的讨论、帖子、用户动态或社交媒体舆论
+
+        返回内容：搜索结果的文本摘要，可能附带参考来源链接。如果搜索失败会返回错误信息。
 
         Args:
-            query(string): 搜索查询内容，应该是清晰具体的问题或关键词
-            image_urls(string): 可选，逗号分隔的图片 URL 或 base64:// 链接
+            query(string): 搜索查询内容，应是清晰、具体、自包含的自然语言问题或关键词
+            image_urls(string): 可选，逗号分隔的图片URL，用于基于图片内容的搜索
         """
         # 收集图片：从 LLM 传入的 image_urls 参数 + 用户消息中提取
         images: list[str] = []
@@ -867,19 +1015,54 @@ class GrokSearchPlugin(Star):
         result = await self._do_search(query, use_retry=False, images=images or None)
         return self._format_result_for_llm(result)
 
-    @filter.on_llm_request()
-    async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest):
-        """在 LLM 请求时，如果启用了 Skill 则移除 grok_web_search 工具"""
-        if not self.config.get("enable_skill", False):
-            return
+    @filter.llm_tool(name="grok_web_fetch")
+    async def grok_fetch_tool(self, event: AstrMessageEvent, url: str):
+        """网页内容抓取工具。利用 Grok 联网能力获取指定 URL 的完整网页内容，转换为结构化 Markdown 格式返回。
 
-        tool_set = req.func_tool
-        if isinstance(tool_set, FunctionToolManager):
-            req.func_tool = tool_set.get_full_tool_set()
-            tool_set = req.func_tool
+        使用场景：
+        - 需要读取某个网页的完整内容（文章、文档、帖子等）
+        - 需要提取网页中的具体数据（表格、代码示例、列表等）
+        - 用户提供了一个 URL 并要求查看或总结其内容
 
-        if tool_set:
-            tool_set.remove_tool("grok_web_search")
+        注意：不需要额外配置外部 API，直接通过 Grok 的联网能力实现。
+
+        Args:
+            url(string): 要抓取的网页 URL，必须是完整的 HTTP/HTTPS 地址
+        """
+        if not url or not url.startswith("http"):
+            return "错误：请提供完整的 HTTP/HTTPS URL"
+
+        base_url = self.config.get("base_url", "")
+        api_key = self.config.get("api_key", "")
+        model = self.config.get("model", "grok-4-fast")
+        timeout = self.config.get("timeout_seconds", 60)
+        proxy = self.config.get("proxy", "") or None
+
+        extra_body_str = self.config.get("extra_body", "")
+        extra_headers_str = self.config.get("extra_headers", "")
+        extra_body, _ = parse_json_config(extra_body_str)
+        extra_headers, _ = parse_json_config(extra_headers_str)
+
+        result = await grok_fetch(
+            url=url,
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            timeout=float(timeout) if timeout else 60.0,
+            extra_body=extra_body or None,
+            extra_headers=extra_headers or None,
+            proxy=proxy,
+        )
+
+        if result.get("ok"):
+            content = result.get("content", "")
+            elapsed = result.get("elapsed_ms", 0)
+            if content:
+                return f"{content}\n\n---\n耗时: {elapsed}ms"
+            return "抓取成功但页面内容为空"
+        else:
+            error = result.get("error", "未知错误")
+            return f"网页抓取失败: {error}"
 
     @filter.on_astrbot_loaded()
     async def on_astrbot_loaded(self):
