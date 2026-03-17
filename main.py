@@ -890,37 +890,41 @@ class GrokSearchPlugin(Star):
 
         # 判断是否以图片卡片形式发送
         use_image = self.config.get("render_as_image", False) and self._card_fonts_ready
+        image_sent = False
 
-        try:
-            if use_image and result.get("ok"):
-                content = result.get("content", "")
-                sources = result.get("sources", [])
-                elapsed = result.get("elapsed_ms", 0)
-                usage = result.get("usage") or {}
-                total_tokens = usage.get("total_tokens", 0)
-                model = self.config.get("model", "")
-                theme = self.config.get("card_theme", "auto")
+        if use_image and result.get("ok"):
+            content = result.get("content", "")
+            sources = result.get("sources", [])
+            elapsed = result.get("elapsed_ms", 0)
+            usage = result.get("usage") or {}
+            total_tokens = usage.get("total_tokens", 0)
+            model = self.config.get("model", "")
+            theme = self.config.get("card_theme", "auto")
 
-                # 渲染图片
-                import tempfile
+            import tempfile
 
+            tmp_path = None
+            try:
                 with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                     tmp_path = tmp.name
-                try:
-                    render_search_card(
-                        content=content,
-                        model=model,
-                        elapsed_ms=elapsed,
-                        total_tokens=total_tokens,
-                        output_path=tmp_path,
-                        theme=theme,
-                    )
-                    await event.send(MessageChain().image(tmp_path))
-                finally:
-                    if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
+                render_search_card(
+                    content=content,
+                    model=model,
+                    elapsed_ms=elapsed,
+                    total_tokens=total_tokens,
+                    output_path=tmp_path,
+                    theme=theme,
+                )
+                await event.send(MessageChain().file_image(tmp_path))
+                image_sent = True
+            except Exception as e:
+                logger.warning(f"[{PLUGIN_NAME}] 图片卡片发送失败，降级为文本: {e}")
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
 
-                # 来源链接单独以文本发送（可点击/复制）
+            # 来源链接单独以文本发送（可点击/复制）
+            if image_sent:
                 show_sources = self.config.get("show_sources", False)
                 max_sources = self.config.get("max_sources", 5)
                 if show_sources and sources:
@@ -934,15 +938,17 @@ class GrokSearchPlugin(Star):
                             src_lines.append(f"  {i}. {title}\n     {url}")
                         else:
                             src_lines.append(f"  {i}. {url}")
-                    await event.send(MessageChain().message("\n".join(src_lines)))
-            else:
-                await event.send(MessageChain().message(self._format_result(result)))
-        except Exception as e:
-            logger.warning(f"[{PLUGIN_NAME}] 发送搜索结果失败: {e}")
+                    try:
+                        await event.send(MessageChain().message("\n".join(src_lines)))
+                    except Exception as e:
+                        logger.warning(f"[{PLUGIN_NAME}] 来源链接发送失败: {e}")
+
+        # 文本模式或图片发送失败时降级
+        if not image_sent:
             try:
                 await event.send(MessageChain().message(self._format_result(result)))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[{PLUGIN_NAME}] 发送搜索结果失败: {e}")
 
     @filter.llm_tool(name="grok_web_search")
     async def grok_tool(
