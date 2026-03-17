@@ -47,7 +47,11 @@ from .tool.tool import (
     normalize_base_url,
     parse_json_config,
 )
-from .tool.card_render import render_search_card, init_fonts
+from .tool.card_render import (
+    render_search_card,
+    init_fonts,
+    set_logger as set_card_logger,
+)
 
 PLUGIN_NAME = "astrbot_plugin_grok_web_search"
 
@@ -143,6 +147,7 @@ class GrokSearchPlugin(Star):
 
     def _init_fonts(self):
         """Initialize card rendering fonts (runs in background)."""
+        logger.info(f"[{PLUGIN_NAME}] 正在后台初始化卡片渲染字体 ...")
         try:
             if get_astrbot_data_path:
                 font_dir = str(
@@ -150,6 +155,7 @@ class GrokSearchPlugin(Star):
                 )
             else:
                 font_dir = os.path.join(os.path.dirname(__file__), "font")
+            set_card_logger(logger)
             self._card_fonts_ready = init_fonts(font_dir)
             if self._card_fonts_ready:
                 logger.info(f"[{PLUGIN_NAME}] 卡片渲染字体已就绪: {font_dir}")

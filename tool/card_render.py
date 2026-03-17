@@ -7,11 +7,22 @@ Grok 搜索结果卡片渲染器
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from io import BytesIO
 
 from PIL import Image, ImageDraw, ImageFont
+
+# Module-level logger, can be overridden via set_logger()
+_module_logger = logging.getLogger(__name__)
+
+
+def set_logger(logger: logging.Logger) -> None:
+    """Set the logger used by card_render (call before init_fonts)."""
+    global _module_logger
+    _module_logger = logger
+
 
 # ─── 主题配色 ────────────────────────────────────────────────
 
@@ -119,45 +130,45 @@ def _download_fonts(font_dir: str) -> None:
     import tempfile
     import urllib.request
 
+    _log = _module_logger
+
     os.makedirs(font_dir, exist_ok=True)
     archive_path = os.path.join(font_dir, "_font_download.7z")
     part_path = archive_path + ".part"
 
-    # Download with resume support
-    existing_size = 0
-    if os.path.exists(part_path):
-        existing_size = os.path.getsize(part_path)
-        print(
-            f"[card_render] 检测到未完成的下载 ({existing_size / 1024 / 1024:.1f}MB)，继续下载 ..."
-        )
+    # ── Phase 1: Download (skip if .7z already exists) ──
+    if not os.path.exists(archive_path):
+        existing_size = 0
+        if os.path.exists(part_path):
+            existing_size = os.path.getsize(part_path)
+            _log.info(
+                f"检测到未完成的字体下载 ({existing_size / 1024 / 1024:.1f}MB)，继续下载 ..."
+            )
 
-    req = urllib.request.Request(_FONT_DOWNLOAD_URL)
-    if existing_size > 0:
-        req.add_header("Range", f"bytes={existing_size}-")
+        req = urllib.request.Request(_FONT_DOWNLOAD_URL)
+        if existing_size > 0:
+            req.add_header("Range", f"bytes={existing_size}-")
 
-    try:
         if not existing_size:
-            print("[card_render] 正在从清华镜像下载字体 ...")
+            _log.info("正在从清华镜像下载字体 ...")
 
         resp = urllib.request.urlopen(req, timeout=120)
         content_range = resp.headers.get("Content-Range", "")
         total_size = -1
 
         if content_range and "/" in content_range:
-            # Server supports resume: "bytes 12345-99999/100000"
             total_size = int(content_range.split("/")[-1])
         elif existing_size == 0:
             cl = resp.headers.get("Content-Length", "")
             total_size = int(cl) if cl else -1
         else:
-            # Server doesn't support Range, restart from scratch
-            print("[card_render] 服务器不支持断点续传，重新下载 ...")
+            _log.info("服务器不支持断点续传，重新下载 ...")
             existing_size = 0
 
         mode = "ab" if existing_size > 0 else "wb"
         downloaded = existing_size
         chunk_size = 64 * 1024
-        bar_len = 30
+        last_logged_pct = -1
 
         with open(part_path, mode) as f:
             while True:
@@ -167,24 +178,22 @@ def _download_fonts(font_dir: str) -> None:
                 f.write(chunk)
                 downloaded += len(chunk)
                 if total_size > 0:
-                    pct = min(downloaded / total_size, 1.0)
-                    filled = int(bar_len * pct)
-                    bar = "=" * filled + ">" + " " * (bar_len - filled - 1)
-                    dl_mb = downloaded / 1024 / 1024
-                    tot_mb = total_size / 1024 / 1024
-                    print(
-                        f"\r[card_render] Downloading [{bar}] {pct:.0%} "
-                        f"({dl_mb:.1f}/{tot_mb:.1f}MB)",
-                        end="",
-                        flush=True,
-                    )
+                    pct = int(min(downloaded / total_size, 1.0) * 100)
+                    if pct // 10 > last_logged_pct // 10:
+                        f.flush()
+                        os.fsync(f.fileno())
+                        dl_mb = downloaded / 1024 / 1024
+                        tot_mb = total_size / 1024 / 1024
+                        _log.info(f"字体下载进度: {pct}% ({dl_mb:.1f}/{tot_mb:.1f}MB)")
+                        last_logged_pct = pct
 
-        # Download complete, rename .part -> .7z
-        if os.path.exists(archive_path):
-            os.remove(archive_path)
         os.rename(part_path, archive_path)
-        print("\n[card_render] 下载完成，正在解压 ...")
+        _log.info("字体下载完成，正在解压 ...")
+    else:
+        _log.info("检测到已下载的字体包，直接解压 ...")
 
+    # ── Phase 2: Extract ──
+    try:
         try:
             import py7zr
         except ImportError:
@@ -207,9 +216,9 @@ def _download_fonts(font_dir: str) -> None:
                         shutil.copy2(os.path.join(root, fname), font_dir)
                         kept += 1
 
-            print(f"[card_render] 字体安装完成 ({kept} 个文件)")
-
+            _log.info(f"字体安装完成 ({kept} 个文件)")
     finally:
+        # Clean up archive after extraction (success or failure)
         if os.path.exists(archive_path):
             os.remove(archive_path)
 
@@ -231,7 +240,7 @@ def init_fonts(font_dir: str | None = None) -> bool:
     try:
         _download_fonts(font_dir)
     except Exception as e:
-        print(f"[card_render] 字体下载失败: {e}")
+        _module_logger.warning(f"字体下载失败: {e}")
         return False
 
     found = _find_fonts_in_dir(font_dir)
