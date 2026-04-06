@@ -665,6 +665,14 @@ class GrokSearchPlugin(Star):
                 continue
 
             if result.get("ok"):
+                content = str(result.get("content") or "").strip()
+                if not content:
+                    err_msg = "提供商返回空响应"
+                    provider_errors.append(f"{provider_name}: {err_msg}")
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] {provider_name} 搜索结果 content 为空，触发提供商故障转移"
+                    )
+                    continue
                 if provider_index != 1:
                     logger.info(
                         f"[{PLUGIN_NAME}] {provider_name} 搜索成功，前序提供商已故障转移"
