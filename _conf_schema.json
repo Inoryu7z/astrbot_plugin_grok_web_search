@@ -25,13 +25,37 @@
   },
   "base_url": {
     "type": "string",
-    "description": "Grok API 端点 URL",
+    "description": "提供商1 Grok API 端点 URL",
     "hint": "使用自定义供应商时必填,例如: https://api.example.com，会自动补全 /v1/chat/completions 或 /v1/responses"
   },
   "api_key": {
     "type": "string",
-    "description": "Grok API 密钥",
-    "hint": "使用自定义供应商时必填,你的 API Key"
+    "description": "提供商1 Grok API 密钥",
+    "hint": "使用自定义供应商时必填,提供商1 的 API Key"
+  },
+  "provider_2_base_url": {
+    "type": "string",
+    "description": "提供商2 Grok API 端点 URL",
+    "hint": "可选故障转移提供商,例如: https://api2.example.com，会自动补全 /v1/chat/completions 或 /v1/responses",
+    "default": ""
+  },
+  "provider_2_api_key": {
+    "type": "string",
+    "description": "提供商2 Grok API 密钥",
+    "hint": "可选故障转移提供商2 的 API Key",
+    "default": ""
+  },
+  "provider_3_base_url": {
+    "type": "string",
+    "description": "提供商3 Grok API 端点 URL",
+    "hint": "可选故障转移提供商,例如: https://api3.example.com，会自动补全 /v1/chat/completions 或 /v1/responses",
+    "default": ""
+  },
+  "provider_3_api_key": {
+    "type": "string",
+    "description": "提供商3 Grok API 密钥",
+    "hint": "可选故障转移提供商3 的 API Key",
+    "default": ""
   },
   "timeout_seconds": {
     "type": "int",
@@ -59,8 +83,8 @@
   },
   "max_retries": {
     "type": "int",
-    "description": "最大重试次数",
-    "hint": "请求失败时的最大重试次数",
+    "description": "最大重试次数（每个提供商独立生效）",
+    "hint": "请求失败时每个提供商的最大重试次数；当前提供商重试耗尽后会自动切换到下一个提供商",
     "default": 3,
     "slider": {
       "min": 0,
