@@ -737,9 +737,7 @@ class GrokSearchPlugin(Star):
         if provider_index:
             provider_info = f"，提供商: #{provider_index}"
 
-        lines.append(
-            f"\n(耗时: {elapsed:.1f}s{retry_info}{token_info}{provider_info})"
-        )
+        lines.append(f"\n(耗时: {elapsed:.1f}s{retry_info}{token_info}{provider_info})")
 
         return "\n".join(lines)
 
@@ -1166,7 +1164,9 @@ class GrokSearchPlugin(Star):
                 content = result.get("content", "")
                 elapsed = result.get("elapsed_ms", 0)
                 provider_index = result.get("provider_index")
-                provider_suffix = f"\n提供商: #{provider_index}" if provider_index else ""
+                provider_suffix = (
+                    f"\n提供商: #{provider_index}" if provider_index else ""
+                )
                 if content:
                     return f"{content}\n\n---\n耗时: {elapsed}ms{provider_suffix}"
                 return "抓取成功但页面内容为空"
