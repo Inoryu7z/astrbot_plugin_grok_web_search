@@ -52,7 +52,7 @@ async def doubao_responses_search(
     max_keyword: int | None = None,
     limit: int | None = None,
     max_tool_calls: int | None = None,
-    enable_thinking: bool = False,
+    user_location: dict | None = None,
 ) -> dict[str, Any]:
     """
     通过豆包 Responses API 进行联网搜索（异步）
@@ -78,7 +78,7 @@ async def doubao_responses_search(
         max_keyword: 单轮搜索最大关键词数量（1-50）
         limit: 单轮搜索返回最大结果条数（1-50）
         max_tool_calls: 一次响应中工具调用最大轮次（1-10）
-        enable_thinking: 是否开启思考模式
+        user_location: 用户地理位置信息，优化地域相关搜索（如 {"country": "中国", "region": "浙江", "city": "杭州"}）
 
     Returns:
         {
@@ -93,9 +93,7 @@ async def doubao_responses_search(
     """
     started = time.time()
 
-    config = validate_config(
-        base_url, api_key, started, base_url_label="火山方舟 API 端点"
-    )
+    config = validate_config(base_url, api_key, started, base_url_label="火山方舟 API 端点")
     if isinstance(config, dict):
         return config
     base_url, api_key = config
@@ -126,7 +124,9 @@ async def doubao_responses_search(
             )
         user_input = user_content
     else:
-        user_input = [{"type": "input_text", "text": enriched_query}]
+        user_input = [
+            {"type": "input_text", "text": enriched_query}
+        ]
 
     web_search_tool: dict[str, Any] = {"type": "web_search"}
     if max_keyword is not None and 1 <= max_keyword <= 50:
@@ -137,15 +137,22 @@ async def doubao_responses_search(
         valid_sources = [s for s in sources if s in ("douyin", "moji", "toutiao")]
         if valid_sources:
             web_search_tool["sources"] = valid_sources
+    if user_location and isinstance(user_location, dict):
+        loc = {"type": "approximate"}
+        if user_location.get("country"):
+            loc["country"] = str(user_location["country"])
+        if user_location.get("region"):
+            loc["region"] = str(user_location["region"])
+        if user_location.get("city"):
+            loc["city"] = str(user_location["city"])
+        if len(loc) > 1:
+            web_search_tool["user_location"] = loc
 
     body: dict[str, Any] = {
         "model": model,
         "stream": False,
         "input": [
-            {
-                "role": "system",
-                "content": [{"type": "input_text", "text": final_system_prompt}],
-            },
+            {"role": "system", "content": [{"type": "input_text", "text": final_system_prompt}]},
             {"role": "user", "content": user_input},
         ],
         "tools": [web_search_tool],
@@ -154,14 +161,7 @@ async def doubao_responses_search(
     if max_tool_calls is not None and 1 <= max_tool_calls <= 10:
         body["max_tool_calls"] = max_tool_calls
 
-    if enable_thinking:
-        body["thinking"] = {"type": "enabled"}
-
-    merge_extra_body(
-        body,
-        extra_body,
-        {"model", "input", "tools", "stream", "max_tool_calls", "thinking"},
-    )
+    merge_extra_body(body, extra_body, {"model", "input", "tools", "stream", "max_tool_calls"})
     headers = build_headers(api_key, extra_headers)
 
     async def _do_request(
@@ -257,6 +257,12 @@ async def doubao_responses_search(
                     "completion_tokens": output_tokens,
                     "total_tokens": input_tokens + output_tokens,
                 }
+                tool_usage = usage.get("tool_usage")
+                if tool_usage:
+                    usage_info["tool_usage"] = tool_usage
+                tool_usage_details = usage.get("tool_usage_details")
+                if tool_usage_details:
+                    usage_info["tool_usage_details"] = tool_usage_details
 
         if not message:
             parse_error = parse_error or "API 返回了空响应"

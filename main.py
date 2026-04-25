@@ -174,10 +174,8 @@ class GrokSearchPlugin(Star):
                 continue
             model_val = str(item.get("model", "") or "").strip()
             if not model_val:
-                default_model = (
-                    "doubao-seed-2-0-pro-260215"
-                    if is_doubao_provider(base_url)
-                    else str(self.config.get("model", "grok-4-fast") or "grok-4-fast")
+                default_model = "doubao-seed-2-0-pro-260215" if is_doubao_provider(base_url) else str(
+                    self.config.get("model", "grok-4-fast") or "grok-4-fast"
                 )
                 model_val = default_model
             result.append(
@@ -207,11 +205,7 @@ class GrokSearchPlugin(Star):
     ) -> dict:
         """对单个自定义 HTTP 提供商执行搜索。"""
         base_url = str(provider_cfg.get("base_url") or "")
-        default_model = (
-            "doubao-seed-2-0-pro-260215"
-            if is_doubao_provider(base_url)
-            else "grok-4-fast"
-        )
+        default_model = "doubao-seed-2-0-pro-260215" if is_doubao_provider(base_url) else "grok-4-fast"
         model = str(provider_cfg.get("model") or default_model)
 
         if is_doubao_provider(base_url):
@@ -219,7 +213,12 @@ class GrokSearchPlugin(Star):
             doubao_max_keyword = self.config.get("doubao_max_keyword", 5)
             doubao_limit = self.config.get("doubao_limit", 10)
             doubao_max_tool_calls = self.config.get("doubao_max_tool_calls", 3)
-            doubao_enable_thinking = self.config.get("doubao_enable_thinking", False)
+            doubao_user_location = self.config.get("doubao_user_location", {})
+            if isinstance(doubao_user_location, str):
+                parsed_loc, loc_err = parse_json_config(doubao_user_location)
+                if loc_err:
+                    logger.warning(f"[{PLUGIN_NAME}] doubao_user_location {loc_err}")
+                doubao_user_location = parsed_loc
 
             if system_prompt == DEFAULT_JSON_SYSTEM_PROMPT:
                 system_prompt = DOUBAO_JSON_SYSTEM_PROMPT
@@ -245,7 +244,7 @@ class GrokSearchPlugin(Star):
                 max_keyword=doubao_max_keyword,
                 limit=doubao_limit,
                 max_tool_calls=doubao_max_tool_calls,
-                enable_thinking=doubao_enable_thinking,
+                user_location=doubao_user_location if doubao_user_location else None,
             )
         elif self.config.get("use_responses_api", False):
             result = await grok_responses_search(
@@ -352,9 +351,48 @@ class GrokSearchPlugin(Star):
             provider_model = str(provider_cfg.get("model") or "")
 
             if is_doubao_provider(base_url):
-                logger.info(
-                    f"[{PLUGIN_NAME}] {provider_name} 为豆包提供商，跳过连通性检查"
-                )
+                models_url = f"{normalize_base_url(base_url)}/api/v3/models"
+                headers = {"Authorization": f"Bearer {api_key}"}
+                if extra_headers:
+                    protected = {"authorization", "content-type"}
+                    for key, value in extra_headers.items():
+                        if str(key).lower() not in protected:
+                            headers[str(key)] = str(value)
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            models_url,
+                            headers=headers,
+                            timeout=aiohttp.ClientTimeout(total=10),
+                            proxy=proxy,
+                        ) as resp:
+                            if resp.status == 401:
+                                logger.warning(
+                                    f"[{PLUGIN_NAME}] {provider_name} 豆包 API 密钥无效（401），请检查对应 api_key 配置"
+                                )
+                            elif resp.status == 403:
+                                logger.warning(
+                                    f"[{PLUGIN_NAME}] {provider_name} 豆包 API 密钥权限不足（403），请检查对应 api_key 权限"
+                                )
+                            elif resp.status != 200:
+                                logger.warning(
+                                    f"[{PLUGIN_NAME}] {provider_name} 豆包 API 连通性检查返回 HTTP {resp.status}，请确认配置"
+                                )
+                            else:
+                                model_info = (
+                                    f" (model: {provider_model})" if provider_model else ""
+                                )
+                                logger.info(
+                                    f"[{PLUGIN_NAME}] {provider_name} 豆包 API 连通性检查通过{model_info}"
+                                )
+                except aiohttp.ClientError as e:
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] {provider_name} 豆包 API 连通性检查失败（网络错误）: {e}，请检查 base_url 配置"
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] {provider_name} 豆包 API 连通性检查超时，请检查 base_url 是否可达"
+                    )
                 continue
 
             models_url = f"{base_url}/v1/models"
@@ -1128,6 +1166,13 @@ class GrokSearchPlugin(Star):
         for provider_cfg in providers:
             provider_name = str(provider_cfg.get("name") or "provider")
             provider_model = str(provider_cfg.get("model") or "")
+            base_url = str(provider_cfg.get("base_url") or "")
+            if is_doubao_provider(base_url):
+                provider_errors.append(f"{provider_name}: 豆包提供商暂不支持网页抓取")
+                logger.info(
+                    f"[{PLUGIN_NAME}] {provider_name} 为豆包提供商，跳过网页抓取"
+                )
+                continue
             logger.info(
                 f"[{PLUGIN_NAME}] 正在尝试 {provider_name} (model={provider_model}) 执行网页抓取"
             )

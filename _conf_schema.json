@@ -23,7 +23,7 @@
           "base_url": {
             "type": "string",
             "description": "API 端点 URL",
-            "hint": "例如: https://api.x.ai，会自动补全 /v1/chat/completions 或 /v1/responses",
+            "hint": "Grok: https://api.x.ai | 豆包: https://ark.cn-beijing.volces.com，会自动补全 API 路径",
             "default": ""
           },
           "api_key": {
@@ -208,11 +208,14 @@
       "step": 1
     }
   },
-  "doubao_enable_thinking": {
-    "type": "bool",
-    "description": "豆包是否开启思考模式",
-    "hint": "开启后模型会先思考再搜索，搜索更精准但响应更慢、token消耗更多。仅对豆包提供商生效",
-    "default": false
+  "doubao_user_location": {
+    "type": "text",
+    "description": "豆包用户地理位置（JSON 格式）",
+    "hint": "优化地域相关搜索结果，如天气、本地信息。格式: {\"country\": \"中国\", \"region\": \"浙江\", \"city\": \"杭州\"}，留空不启用。仅对豆包提供商生效",
+    "default": "",
+    "editor_mode": true,
+    "editor_language": "json",
+    "editor_theme": "vs-dark"
   },
   "proxy": {
     "type": "string",

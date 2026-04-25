@@ -2,7 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [1.3.1] - 2026-04-25
+## [1.3.1] - 2026-04-26
+
+### Fixed
+- **豆包 URL 路径重复 bug**：`normalize_base_url` 未剥离 `/api/v3` 后缀，用户按官方文档填入 `https://ark.cn-beijing.volces.com/api/v3` 时会拼出 `/api/v3/api/v3/responses` 导致所有豆包请求 404
+- **移除未文档化的 `thinking` 参数**：火山方舟官方文档未定义 `thinking` 请求体参数，可能导致 400 错误；"边想边搜"功能通过系统提示词引导实现，不需要请求参数
+- **`grok_web_fetch` 对豆包提供商的错误处理**：豆包提供商无 `/v1/chat/completions` 端点，fetch 工具会调用错误 URL；改为跳过并返回友好提示
+- **豆包连通性检查**：之前跳过检查导致用户填错 API Key 无早期反馈；新增 `/api/v3/models` 端点检查
 
 ### Added
 - **豆包搜索集成**：新增 `api/doubao_responses.py`，通过火山方舟 Responses API 调用豆包模型进行联网搜索
@@ -11,11 +17,13 @@
   - 支持图片搜索（VLM 多模态输入）
   - 使用原生 `url_citation` annotations 提取来源，回退 URL 文本解析
 - **豆包专用系统提示词**：`DOUBAO_DEFAULT_SYSTEM_PROMPT`（中文原生提示词）和 `DOUBAO_JSON_SYSTEM_PROMPT`（JSON 输出提示词，兼容 dayflow 等插件）
-- **豆包专用配置项**：`doubao_sources`、`doubao_max_keyword`、`doubao_limit`、`doubao_max_tool_calls`、`doubao_enable_thinking`
-- **连通性检查跳过**：豆包提供商跳过 `/v1/models` 连通性检查
+- **豆包专用配置项**：`doubao_sources`、`doubao_max_keyword`、`doubao_limit`、`doubao_max_tool_calls`、`doubao_user_location`
+- **`doubao_user_location` 地理位置优化**：支持豆包官方文档的 `web_search.user_location` 参数，优化地域相关搜索（天气、本地信息等），替换原 `doubao_enable_thinking` 配置项
+- **`usage.tool_usage` 搜索用量提取**：豆包按搜索次数计费，提取 `tool_usage`（总次数）和 `tool_usage_details`（各搜索源明细）供用户追踪成本
 - **默认模型自动选择**：豆包提供商默认使用 `doubao-seed-2-0-pro-260215`
 - **帮助文本更新**：豆包提供商在帮助信息中显示 `[豆包]` 标签
 - **Skill 脚本支持豆包**：`grok_search.py` 新增豆包 API 调用和响应解析
+- **配置提示更新**：base_url hint 补充豆包 URL 示例
 
 ### Removed
 - **旧版 provider1/2/3 配置项**：移除 `base_url`、`api_key`、`model`、`provider_2_*`、`provider_3_*` 共 9 个旧版配置项，统一使用 `providers`（template_list）配置

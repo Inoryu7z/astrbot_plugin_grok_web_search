@@ -18,6 +18,7 @@ if _PLUGIN_DIR not in sys.path:
 from tool import (  # noqa: E402
     FETCH_SYSTEM_PROMPT,
     DOUBAO_DEFAULT_SYSTEM_PROMPT,
+    DOUBAO_JSON_SYSTEM_PROMPT,
     coerce_json_object as _coerce_json_object,
     extract_urls as _extract_urls,
     get_local_time_info,
@@ -309,7 +310,7 @@ def _request_doubao_responses_api(
     max_keyword: int | None = None,
     limit: int | None = None,
     max_tool_calls: int | None = None,
-    enable_thinking: bool = False,
+    user_location: dict | None = None,
 ) -> dict[str, Any]:
     """通过豆包 Responses API (/api/v3/responses) 发起搜索请求"""
     url = f"{_normalize_base_url(base_url)}/api/v3/responses"
@@ -338,7 +339,9 @@ def _request_doubao_responses_api(
             )
         user_input = user_content
     else:
-        user_input = [{"type": "input_text", "text": enriched_query}]
+        user_input = [
+            {"type": "input_text", "text": enriched_query}
+        ]
 
     web_search_tool: dict[str, Any] = {"type": "web_search"}
     if max_keyword is not None and 1 <= max_keyword <= 50:
@@ -349,6 +352,16 @@ def _request_doubao_responses_api(
         valid_sources = [s for s in sources if s in ("douyin", "moji", "toutiao")]
         if valid_sources:
             web_search_tool["sources"] = valid_sources
+    if user_location and isinstance(user_location, dict):
+        loc = {"type": "approximate"}
+        if user_location.get("country"):
+            loc["country"] = str(user_location["country"])
+        if user_location.get("region"):
+            loc["region"] = str(user_location["region"])
+        if user_location.get("city"):
+            loc["city"] = str(user_location["city"])
+        if len(loc) > 1:
+            web_search_tool["user_location"] = loc
 
     body: dict[str, Any] = {
         "model": model,
@@ -363,10 +376,7 @@ def _request_doubao_responses_api(
     if max_tool_calls is not None and 1 <= max_tool_calls <= 10:
         body["max_tool_calls"] = max_tool_calls
 
-    if enable_thinking:
-        body["thinking"] = {"type": "enabled"}
-
-    protected_keys = {"model", "input", "tools", "stream", "max_tool_calls", "thinking"}
+    protected_keys = {"model", "input", "tools", "stream", "max_tool_calls"}
     for key, value in extra_body.items():
         if key not in protected_keys:
             body[key] = value
@@ -678,11 +688,7 @@ def main() -> int:
                 break
 
     if not model:
-        model = (
-            "doubao-seed-2-0-pro-260215"
-            if _is_doubao_provider(base_url)
-            else "grok-4-fast"
-        )
+        model = "doubao-seed-2-0-pro-260215" if _is_doubao_provider(base_url) else "grok-4-fast"
 
     is_doubao = _is_doubao_provider(base_url)
 
@@ -820,7 +826,12 @@ def main() -> int:
             doubao_max_keyword = config.get("doubao_max_keyword", 5)
             doubao_limit = config.get("doubao_limit", 10)
             doubao_max_tool_calls = config.get("doubao_max_tool_calls", 3)
-            doubao_enable_thinking = config.get("doubao_enable_thinking", False)
+            doubao_user_location = config.get("doubao_user_location", {})
+            if isinstance(doubao_user_location, str):
+                try:
+                    doubao_user_location = json.loads(doubao_user_location)
+                except (json.JSONDecodeError, TypeError):
+                    doubao_user_location = {}
 
             resp = _request_doubao_responses_api(
                 base_url=base_url,
@@ -835,7 +846,7 @@ def main() -> int:
                 max_keyword=doubao_max_keyword,
                 limit=doubao_limit,
                 max_tool_calls=doubao_max_tool_calls,
-                enable_thinking=doubao_enable_thinking,
+                user_location=doubao_user_location if doubao_user_location else None,
             )
         elif use_responses_api and not is_fetch_mode:
             resp = _request_responses_api(

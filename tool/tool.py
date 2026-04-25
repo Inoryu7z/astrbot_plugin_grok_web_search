@@ -228,10 +228,12 @@ def normalize_api_key(api_key: str) -> str:
 
 
 def normalize_base_url(base_url: str) -> str:
-    """规范化 Base URL，移除尾部 / 和 /v1"""
+    """规范化 Base URL，移除尾部 / 和已知路径后缀（/v1、/api/v3）"""
     base_url = base_url.strip().rstrip("/")
-    if base_url.endswith("/v1"):
-        return base_url[: -len("/v1")]
+    for suffix in ("/api/v3", "/v1"):
+        if base_url.endswith(suffix):
+            base_url = base_url[: -len(suffix)]
+            break
     return base_url
 
 
