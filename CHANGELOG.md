@@ -16,11 +16,10 @@
 - **默认模型自动选择**：豆包提供商默认使用 `doubao-seed-2-0-pro-260215`
 - **帮助文本更新**：豆包提供商在帮助信息中显示 `[豆包]` 标签
 - **Skill 脚本支持豆包**：`grok_search.py` 新增豆包 API 调用和响应解析
-- **动态提供商列表**：新增 `providers` 配置项（`template_list` 类型），支持在 WebUI 中动态添加/删除任意数量的提供商，替代原来固定 3 个提供商的限制
-  - 每个提供商包含 `base_url`、`api_key`、`model` 三个字段
-  - 按列表顺序进行故障转移
-  - 旧版 `provider1/2/3` 配置项保留，自动迁移到新格式
-- **自动配置迁移**：插件初始化时检测旧版 `provider1/2/3` 配置，自动迁移到 `providers` 列表并保存
+
+### Removed
+- **旧版 provider1/2/3 配置项**：移除 `base_url`、`api_key`、`model`、`provider_2_*`、`provider_3_*` 共 9 个旧版配置项，统一使用 `providers`（template_list）配置
+- **旧版自动迁移逻辑**：移除 `_migrate_legacy_providers()` 方法和 `_get_custom_provider_pool()` 中的旧版回退逻辑
 
 ### Fixed
 - **reasoning_content 回退**：当 Grok API 开启 thinking 模式时，模型可能将回答放在 `reasoning_content` 字段而非 `content` 字段。之前代码只读取 `content`，导致误判为"choices[0].message.content 为空"。现在当 `content` 为空时会回退读取 `reasoning_content`（同时覆盖 SSE 流式和非 SSE 两种响应格式）
