@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff format (auto-fix)
+        run: ruff format .
+
+      - name: Run ruff check (auto-fix)
+        run: ruff check --fix .
+
+      - name: Commit changes
+        if: github.event_name == 'push'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "style: auto-fix with ruff format & check"
+          commit_options: "--no-verify"
+
+      - name: Check for uncommitted changes (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          if ! git diff --quiet; then
+            echo "::error::Code style issues found. Run 'ruff format . && ruff check --fix .' locally."
+            git diff --stat
+            exit 1
+          fi
+
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install aiohttp pyright
+
+      - name: Run pyright
+        run: pyright --verifytypes astrbot_plugin_grok_web_search || true
+        continue-on-error: true
