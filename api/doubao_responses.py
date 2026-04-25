@@ -93,7 +93,9 @@ async def doubao_responses_search(
     """
     started = time.time()
 
-    config = validate_config(base_url, api_key, started, base_url_label="火山方舟 API 端点")
+    config = validate_config(
+        base_url, api_key, started, base_url_label="火山方舟 API 端点"
+    )
     if isinstance(config, dict):
         return config
     base_url, api_key = config
@@ -124,9 +126,7 @@ async def doubao_responses_search(
             )
         user_input = user_content
     else:
-        user_input = [
-            {"type": "input_text", "text": enriched_query}
-        ]
+        user_input = [{"type": "input_text", "text": enriched_query}]
 
     web_search_tool: dict[str, Any] = {"type": "web_search"}
     if max_keyword is not None and 1 <= max_keyword <= 50:
@@ -152,7 +152,10 @@ async def doubao_responses_search(
         "model": model,
         "stream": False,
         "input": [
-            {"role": "system", "content": [{"type": "input_text", "text": final_system_prompt}]},
+            {
+                "role": "system",
+                "content": [{"type": "input_text", "text": final_system_prompt}],
+            },
             {"role": "user", "content": user_input},
         ],
         "tools": [web_search_tool],
@@ -161,7 +164,9 @@ async def doubao_responses_search(
     if max_tool_calls is not None and 1 <= max_tool_calls <= 10:
         body["max_tool_calls"] = max_tool_calls
 
-    merge_extra_body(body, extra_body, {"model", "input", "tools", "stream", "max_tool_calls"})
+    merge_extra_body(
+        body, extra_body, {"model", "input", "tools", "stream", "max_tool_calls"}
+    )
     headers = build_headers(api_key, extra_headers)
 
     async def _do_request(

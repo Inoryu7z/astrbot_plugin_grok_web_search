@@ -174,8 +174,10 @@ class GrokSearchPlugin(Star):
                 continue
             model_val = str(item.get("model", "") or "").strip()
             if not model_val:
-                default_model = "doubao-seed-2-0-pro-260215" if is_doubao_provider(base_url) else str(
-                    self.config.get("model", "grok-4-fast") or "grok-4-fast"
+                default_model = (
+                    "doubao-seed-2-0-pro-260215"
+                    if is_doubao_provider(base_url)
+                    else str(self.config.get("model", "grok-4-fast") or "grok-4-fast")
                 )
                 model_val = default_model
             result.append(
@@ -205,7 +207,11 @@ class GrokSearchPlugin(Star):
     ) -> dict:
         """对单个自定义 HTTP 提供商执行搜索。"""
         base_url = str(provider_cfg.get("base_url") or "")
-        default_model = "doubao-seed-2-0-pro-260215" if is_doubao_provider(base_url) else "grok-4-fast"
+        default_model = (
+            "doubao-seed-2-0-pro-260215"
+            if is_doubao_provider(base_url)
+            else "grok-4-fast"
+        )
         model = str(provider_cfg.get("model") or default_model)
 
         if is_doubao_provider(base_url):
@@ -380,7 +386,9 @@ class GrokSearchPlugin(Star):
                                 )
                             else:
                                 model_info = (
-                                    f" (model: {provider_model})" if provider_model else ""
+                                    f" (model: {provider_model})"
+                                    if provider_model
+                                    else ""
                                 )
                                 logger.info(
                                     f"[{PLUGIN_NAME}] {provider_name} 豆包 API 连通性检查通过{model_info}"
