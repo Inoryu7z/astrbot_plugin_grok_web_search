@@ -18,7 +18,6 @@ if _PLUGIN_DIR not in sys.path:
 from tool import (  # noqa: E402
     FETCH_SYSTEM_PROMPT,
     DOUBAO_DEFAULT_SYSTEM_PROMPT,
-    DOUBAO_JSON_SYSTEM_PROMPT,
     coerce_json_object as _coerce_json_object,
     extract_urls as _extract_urls,
     get_local_time_info,
@@ -339,9 +338,7 @@ def _request_doubao_responses_api(
             )
         user_input = user_content
     else:
-        user_input = [
-            {"type": "input_text", "text": enriched_query}
-        ]
+        user_input = [{"type": "input_text", "text": enriched_query}]
 
     web_search_tool: dict[str, Any] = {"type": "web_search"}
     if max_keyword is not None and 1 <= max_keyword <= 50:
@@ -681,7 +678,11 @@ def main() -> int:
                 break
 
     if not model:
-        model = "doubao-seed-2-0-pro-260215" if _is_doubao_provider(base_url) else "grok-4-fast"
+        model = (
+            "doubao-seed-2-0-pro-260215"
+            if _is_doubao_provider(base_url)
+            else "grok-4-fast"
+        )
 
     is_doubao = _is_doubao_provider(base_url)
 
