@@ -167,10 +167,14 @@ async def doubao_responses_search(
         body["max_tool_calls"] = max_tool_calls
 
     if reasoning_effort and reasoning_effort in ("minimal", "low", "medium", "high"):
-        body["reasoning_effort"] = reasoning_effort
+        body["reasoning"] = {"effort": reasoning_effort}
+        if reasoning_effort == "minimal":
+            body["thinking"] = {"type": "disabled"}
+        else:
+            body["thinking"] = {"type": "enabled"}
 
     merge_extra_body(
-        body, extra_body, {"model", "input", "tools", "stream", "max_tool_calls", "reasoning_effort"}
+        body, extra_body, {"model", "input", "tools", "stream", "max_tool_calls", "reasoning", "thinking"}
     )
     headers = build_headers(api_key, extra_headers)
 
