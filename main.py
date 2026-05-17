@@ -307,6 +307,7 @@ class GrokSearchPlugin(Star):
                 limit=doubao_limit,
                 max_tool_calls=doubao_max_tool_calls,
                 user_location=doubao_user_location if doubao_user_location else None,
+                reasoning_effort=str(provider_cfg.get("reasoning_effort") or "").strip() or None,
             )
         elif self.config.get("use_responses_api", False):
             result = await grok_responses_search(

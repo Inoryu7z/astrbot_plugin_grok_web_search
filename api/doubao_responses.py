@@ -54,6 +54,7 @@ async def doubao_responses_search(
     limit: int | None = None,
     max_tool_calls: int | None = None,
     user_location: dict | None = None,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     """
     通过豆包 Responses API 进行联网搜索（异步）
@@ -165,8 +166,11 @@ async def doubao_responses_search(
     if max_tool_calls is not None and 1 <= max_tool_calls <= 10:
         body["max_tool_calls"] = max_tool_calls
 
+    if reasoning_effort and reasoning_effort in ("minimal", "low", "medium", "high"):
+        body["reasoning_effort"] = reasoning_effort
+
     merge_extra_body(
-        body, extra_body, {"model", "input", "tools", "stream", "max_tool_calls"}
+        body, extra_body, {"model", "input", "tools", "stream", "max_tool_calls", "reasoning_effort"}
     )
     headers = build_headers(api_key, extra_headers)
 
