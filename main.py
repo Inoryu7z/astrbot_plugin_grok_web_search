@@ -196,6 +196,7 @@ class GrokSearchPlugin(Star):
                 "api_key": api_key,
                 "model": model_val,
                 "fetch_bot_id": str(item.get("fetch_bot_id") or "").strip(),
+                "reasoning_effort": str(item.get("reasoning_effort") or "").strip(),
             }
             all_providers.append(entry)
             provider_id = str(item.get("id") or "").strip()
