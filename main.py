@@ -161,16 +161,19 @@ class GrokSearchPlugin(Star):
         except Exception as e:
             logger.warning(f"[{PLUGIN_NAME}] 字体初始化异常: {e}")
 
-    def _get_custom_provider_pool(self) -> list[dict[str, str | int]]:
+    def _get_custom_provider_pool(self, prefer_quality: bool = False) -> list[dict[str, str | int]]:
         """获取自定义 HTTP 提供商故障转移池。
 
-        读取 providers 列表（template_list），按列表顺序返回，前面的提供商优先使用。
+        优先根据链路配置选择提供商：
+        - prefer_quality=False: 使用 speed_chain（速度优先），未配置则回退到 providers 原始顺序
+        - prefer_quality=True: 使用 quality_chain（质量优先），未配置则回退到 speed_chain 或 providers 原始顺序
         """
         providers_list = self.config.get("providers")
         if not isinstance(providers_list, list) or not providers_list:
             return []
 
-        result: list[dict[str, str | int]] = []
+        all_providers: list[dict[str, str | int]] = []
+        id_map: dict[str, dict[str, str | int]] = {}
         for idx, item in enumerate(providers_list):
             if not isinstance(item, dict):
                 continue
@@ -186,17 +189,63 @@ class GrokSearchPlugin(Star):
                     else str(self.config.get("model", "grok-4-fast") or "grok-4-fast")
                 )
                 model_val = default_model
-            result.append(
-                {
-                    "index": idx + 1,
-                    "name": f"provider{idx + 1}",
-                    "base_url": base_url,
-                    "api_key": api_key,
-                    "model": model_val,
-                    "fetch_bot_id": str(item.get("fetch_bot_id") or "").strip(),
-                }
-            )
-        return result
+            entry = {
+                "index": idx + 1,
+                "name": f"provider{idx + 1}",
+                "base_url": base_url,
+                "api_key": api_key,
+                "model": model_val,
+                "fetch_bot_id": str(item.get("fetch_bot_id") or "").strip(),
+            }
+            all_providers.append(entry)
+            provider_id = str(item.get("id") or "").strip()
+            if provider_id:
+                id_map[provider_id] = entry
+
+        chain_ids = self._resolve_chain_ids(prefer_quality)
+        if chain_ids and id_map:
+            resolved: list[dict[str, str | int]] = []
+            seen_ids: set[str] = set()
+            for pid in chain_ids:
+                if pid in seen_ids:
+                    continue
+                seen_ids.add(pid)
+                if pid in id_map:
+                    resolved.append(id_map[pid])
+                else:
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] 链路引用的提供商 ID '{pid}' 不存在，已跳过"
+                    )
+            if resolved:
+                return resolved
+
+        return all_providers
+
+    def _resolve_chain_ids(self, prefer_quality: bool) -> list[str]:
+        """根据 prefer_quality 参数解析链路中的提供商 ID 列表。"""
+        if prefer_quality:
+            quality_ids = self._parse_chain_config("quality_chain")
+            if quality_ids:
+                return quality_ids
+        speed_ids = self._parse_chain_config("speed_chain")
+        if speed_ids:
+            return speed_ids
+        return []
+
+    def _parse_chain_config(self, chain_key: str) -> list[str]:
+        """解析 template_list 格式的链路配置，返回提供商 ID 列表。"""
+        chain_list = self.config.get(chain_key)
+        if not isinstance(chain_list, list) or not chain_list:
+            return []
+        ids: list[str] = []
+        for item in chain_list:
+            if isinstance(item, str) and item.strip():
+                ids.append(item.strip())
+            elif isinstance(item, dict):
+                pid = str(item.get("provider_id") or item.get("provider", {}).get("provider_id") or "").strip()
+                if pid:
+                    ids.append(pid)
+        return ids
 
     async def _run_custom_provider_search(
         self,
@@ -581,6 +630,7 @@ class GrokSearchPlugin(Star):
         system_prompt: str | None = None,
         use_retry: bool = False,
         images: list[str] | None = None,
+        prefer_quality: bool = False,
     ) -> dict:
         """Execute a search.
 
@@ -589,6 +639,7 @@ class GrokSearchPlugin(Star):
             system_prompt: Custom system prompt, uses default when None
             use_retry: Whether to enable retry (command invocation only)
             images: Optional list of base64-encoded images for multimodal queries
+            prefer_quality: When True, use quality_chain instead of speed_chain for provider selection
         """
         try:
             timeout_val = self.config.get("timeout_seconds", 60)
@@ -727,7 +778,7 @@ class GrokSearchPlugin(Star):
                         return {"ok": False, "error": str(last_exc)}
                     await asyncio.sleep(retry_delay * attempts)
 
-        providers = self._get_custom_provider_pool()
+        providers = self._get_custom_provider_pool(prefer_quality=prefer_quality)
         if not providers:
             return {
                 "ok": False,
@@ -785,9 +836,7 @@ class GrokSearchPlugin(Star):
                     "timeout",
                     "connection refused",
                 ]
-                is_error_content = any(
-                    p in content_lower for p in content_error_patterns
-                )
+                is_error_content = any(p in content_lower for p in content_error_patterns)
                 if is_error_content:
                     err_msg = f"提供商返回错误内容: {content[:200]}"
                     provider_errors.append(f"{provider_name}: {err_msg}")
@@ -1142,31 +1191,31 @@ class GrokSearchPlugin(Star):
     ) -> str:
         """首选实时联网搜索工具。凡是涉及搜索、查证、最新信息、外部资料、网页/X 平台动态、报错排查等任务，必须优先调用本工具。
 
-        适用场景：
-        - 用户明确要求"搜索/查一下/帮我搜/联网查证"
-        - 用户说"搜一个xxx的图片/照片"——"搜"指联网搜索，搜到图片 URL 后应调用 grok_download_file 下载发送给用户
-        - 时效性内容：最新动态、新闻、天气、股价、版本发布
-        - 需要事实核验：不确定、可能过期、可能记忆不完整
-        - 技术问题：报错信息、API 用法、官方文档、GitHub issue
-        - 外部平台内容：网页、博客、X（Twitter）、产品页面
-        - 带图搜索：用户发送图片，或要求结合图片内容联网判断
+适用场景：
+- 用户明确要求"搜索/查一下/帮我搜/联网查证"
+- 用户说"搜一个xxx的图片/照片"——"搜"指联网搜索，搜到图片 URL 后应调用 grok_download_file 下载发送给用户
+- 时效性内容：最新动态、新闻、天气、股价、版本发布
+- 需要事实核验：不确定、可能过期、可能记忆不完整
+- 技术问题：报错信息、API 用法、官方文档、GitHub issue
+- 外部平台内容：网页、博客、X（Twitter）、产品页面
+- 带图搜索：用户发送图片，或要求结合图片内容联网判断
 
-        调用原则：
-        - 只要存在"需要搜索"的成分，就优先调用本工具，不要仅凭记忆作答
-        - 若同时存在其他搜索类工具，本工具优先级更高
-        - 用户给出 URL 且意图是"读取网页正文"→优先使用 grok_web_fetch
-        - 搜索结果包含图片 URL 且用户要求发送图片→搜索完成后立即调用 grok_download_file 下载发送
-        - 涉及训练数据截止日期之后的信息→必须调用本工具
+调用原则：
+- 只要存在"需要搜索"的成分，就优先调用本工具，不要仅凭记忆作答
+- 若同时存在其他搜索类工具，本工具优先级更高
+- 用户给出 URL 且意图是"读取网页正文"→优先使用 grok_web_fetch
+- 搜索结果包含图片 URL 且用户要求发送图片→搜索完成后立即调用 grok_download_file 下载发送
+- 涉及训练数据截止日期之后的信息→必须调用本工具
 
-        query 编写原则：
-        - 使用详细的自然语言描述搜索意图，而非简短关键词
-        - 好的 query 示例："2026年4月最新的Python 3.13正式版发布日期和新特性"
-        - 差的 query 示例："python 3.13"
-        - 详细描述能帮助搜索引擎更精准地理解意图，返回更相关的结果
+query 编写原则：
+- 使用详细的自然语言描述搜索意图，而非简短关键词
+- 好的 query 示例："2026年4月最新的Python 3.13正式版发布日期和新特性"
+- 差的 query 示例："python 3.13"
+- 详细描述能帮助搜索引擎更精准地理解意图，返回更相关的结果
 
-        Args:
-                    query(string): 搜索查询内容，使用详细的自然语言描述搜索意图和所需信息，不要用搜索引擎语法（如 site:、OR、引号等）
-                    image_urls(string): 可选，逗号分隔的图片 URL 或 base64:// 数据，用于基于图片内容的联网搜索
+Args:
+            query(string): 搜索查询内容，使用详细的自然语言描述搜索意图和所需信息，不要用搜索引擎语法（如 site:、OR、引号等）
+            image_urls(string): 可选，逗号分隔的图片 URL 或 base64:// 数据，用于基于图片内容的联网搜索
         """
         images: list[str] = []
         if image_urls and isinstance(image_urls, str):

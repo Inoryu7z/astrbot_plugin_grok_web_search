@@ -20,6 +20,12 @@
       "custom_provider": {
         "name": "自定义提供商",
         "items": {
+          "id": {
+            "type": "string",
+            "description": "提供商唯一标识",
+            "hint": "用于在链路中引用此提供商，需全局唯一。如 grok-fast、doubao-pro 等",
+            "default": ""
+          },
           "base_url": {
             "type": "string",
             "description": "API 端点 URL",
@@ -42,6 +48,44 @@
             "type": "string",
             "description": "网页解析应用ID（仅豆包）",
             "hint": "豆包零代码应用ID（如 bot-20xxxxxxxx），需在豆包控制台创建带网页解析插件的应用。填写后网页抓取优先使用此应用，未填写则回退到 Grok 提供商",
+            "default": ""
+          }
+        }
+      }
+    }
+  },
+  "speed_chain": {
+    "type": "template_list",
+    "description": "速度优先链路",
+    "hint": "按顺序填写 providers 中的提供商 ID，用于即时搜索场景（/grok 指令、LLM Tool）。未配置时使用 providers 列表原始顺序",
+    "default": [],
+    "templates": {
+      "speed_provider": {
+        "name": "速度优先提供商",
+        "items": {
+          "provider_id": {
+            "type": "string",
+            "description": "提供商 ID",
+            "hint": "填写在 providers 列表中配置的唯一 ID",
+            "default": ""
+          }
+        }
+      }
+    }
+  },
+  "quality_chain": {
+    "type": "template_list",
+    "description": "质量优先链路",
+    "hint": "按顺序填写 providers 中的提供商 ID，用于后台研究场景（如日程插件的风格研究）。未配置时回退到速度优先链路或 providers 列表原始顺序",
+    "default": [],
+    "templates": {
+      "quality_provider": {
+        "name": "质量优先提供商",
+        "items": {
+          "provider_id": {
+            "type": "string",
+            "description": "提供商 ID",
+            "hint": "填写在 providers 列表中配置的唯一 ID",
             "default": ""
           }
         }

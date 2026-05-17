@@ -1,6 +1,16 @@
 # Changelog
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
+## [1.5.0] - 2026-05-17
+
+### Added
+- **双链路提供商路由**：新增 speed_chain（速度优先链路）和 quality_chain（质量优先链路）配置，解决即时搜索与后台研究场景对提供商速度/质量需求冲突的问题
+  - providers 模板新增 id 字段（唯一标识），用于链路引用
+  - speed_chain：填写提供商 ID，用于 /grok 指令和 LLM Tool（即时搜索场景）
+  - quality_chain：填写提供商 ID，用于后台研究场景（如日程插件的风格研究）
+  - 未配置链路时回退到 providers 原始顺序（完全向后兼容）
+- **_do_search() 新增 prefer_quality 参数**：默认 False（速度优先），传 True 时走质量优先链路
+
 
 ## [1.4.1] - 2026-05-10
 
