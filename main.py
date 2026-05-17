@@ -161,7 +161,9 @@ class GrokSearchPlugin(Star):
         except Exception as e:
             logger.warning(f"[{PLUGIN_NAME}] 字体初始化异常: {e}")
 
-    def _get_custom_provider_pool(self, prefer_quality: bool = False) -> list[dict[str, str | int]]:
+    def _get_custom_provider_pool(
+        self, prefer_quality: bool = False
+    ) -> list[dict[str, str | int]]:
         """获取自定义 HTTP 提供商故障转移池。
 
         优先根据链路配置选择提供商：
@@ -242,7 +244,11 @@ class GrokSearchPlugin(Star):
             if isinstance(item, str) and item.strip():
                 ids.append(item.strip())
             elif isinstance(item, dict):
-                pid = str(item.get("provider_id") or item.get("provider", {}).get("provider_id") or "").strip()
+                pid = str(
+                    item.get("provider_id")
+                    or item.get("provider", {}).get("provider_id")
+                    or ""
+                ).strip()
                 if pid:
                     ids.append(pid)
         return ids
@@ -836,7 +842,9 @@ class GrokSearchPlugin(Star):
                     "timeout",
                     "connection refused",
                 ]
-                is_error_content = any(p in content_lower for p in content_error_patterns)
+                is_error_content = any(
+                    p in content_lower for p in content_error_patterns
+                )
                 if is_error_content:
                     err_msg = f"提供商返回错误内容: {content[:200]}"
                     provider_errors.append(f"{provider_name}: {err_msg}")
@@ -1191,31 +1199,31 @@ class GrokSearchPlugin(Star):
     ) -> str:
         """首选实时联网搜索工具。凡是涉及搜索、查证、最新信息、外部资料、网页/X 平台动态、报错排查等任务，必须优先调用本工具。
 
-适用场景：
-- 用户明确要求"搜索/查一下/帮我搜/联网查证"
-- 用户说"搜一个xxx的图片/照片"——"搜"指联网搜索，搜到图片 URL 后应调用 grok_download_file 下载发送给用户
-- 时效性内容：最新动态、新闻、天气、股价、版本发布
-- 需要事实核验：不确定、可能过期、可能记忆不完整
-- 技术问题：报错信息、API 用法、官方文档、GitHub issue
-- 外部平台内容：网页、博客、X（Twitter）、产品页面
-- 带图搜索：用户发送图片，或要求结合图片内容联网判断
+        适用场景：
+        - 用户明确要求"搜索/查一下/帮我搜/联网查证"
+        - 用户说"搜一个xxx的图片/照片"——"搜"指联网搜索，搜到图片 URL 后应调用 grok_download_file 下载发送给用户
+        - 时效性内容：最新动态、新闻、天气、股价、版本发布
+        - 需要事实核验：不确定、可能过期、可能记忆不完整
+        - 技术问题：报错信息、API 用法、官方文档、GitHub issue
+        - 外部平台内容：网页、博客、X（Twitter）、产品页面
+        - 带图搜索：用户发送图片，或要求结合图片内容联网判断
 
-调用原则：
-- 只要存在"需要搜索"的成分，就优先调用本工具，不要仅凭记忆作答
-- 若同时存在其他搜索类工具，本工具优先级更高
-- 用户给出 URL 且意图是"读取网页正文"→优先使用 grok_web_fetch
-- 搜索结果包含图片 URL 且用户要求发送图片→搜索完成后立即调用 grok_download_file 下载发送
-- 涉及训练数据截止日期之后的信息→必须调用本工具
+        调用原则：
+        - 只要存在"需要搜索"的成分，就优先调用本工具，不要仅凭记忆作答
+        - 若同时存在其他搜索类工具，本工具优先级更高
+        - 用户给出 URL 且意图是"读取网页正文"→优先使用 grok_web_fetch
+        - 搜索结果包含图片 URL 且用户要求发送图片→搜索完成后立即调用 grok_download_file 下载发送
+        - 涉及训练数据截止日期之后的信息→必须调用本工具
 
-query 编写原则：
-- 使用详细的自然语言描述搜索意图，而非简短关键词
-- 好的 query 示例："2026年4月最新的Python 3.13正式版发布日期和新特性"
-- 差的 query 示例："python 3.13"
-- 详细描述能帮助搜索引擎更精准地理解意图，返回更相关的结果
+        query 编写原则：
+        - 使用详细的自然语言描述搜索意图，而非简短关键词
+        - 好的 query 示例："2026年4月最新的Python 3.13正式版发布日期和新特性"
+        - 差的 query 示例："python 3.13"
+        - 详细描述能帮助搜索引擎更精准地理解意图，返回更相关的结果
 
-Args:
-            query(string): 搜索查询内容，使用详细的自然语言描述搜索意图和所需信息，不要用搜索引擎语法（如 site:、OR、引号等）
-            image_urls(string): 可选，逗号分隔的图片 URL 或 base64:// 数据，用于基于图片内容的联网搜索
+        Args:
+                    query(string): 搜索查询内容，使用详细的自然语言描述搜索意图和所需信息，不要用搜索引擎语法（如 site:、OR、引号等）
+                    image_urls(string): 可选，逗号分隔的图片 URL 或 base64:// 数据，用于基于图片内容的联网搜索
         """
         images: list[str] = []
         if image_urls and isinstance(image_urls, str):
