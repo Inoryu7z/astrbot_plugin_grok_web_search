@@ -49,6 +49,18 @@
             "description": "网页解析应用ID（仅豆包）",
             "hint": "豆包零代码应用ID（如 bot-20xxxxxxxx），需在豆包控制台创建带网页解析插件的应用。填写后网页抓取优先使用此应用，未填写则回退到 Grok 提供商",
             "default": ""
+          },
+          "reasoning_effort": {
+            "type": "string",
+            "description": "思考强度（仅豆包）",
+            "hint": "控制豆包模型的思考深度。minimal=不思考，low=轻度思考，medium=中度思考，high=深度思考。留空默认 medium",
+            "default": "medium",
+            "options": [
+              "medium",
+              "minimal",
+              "low",
+              "high"
+            ]
           }
         }
       }
