@@ -174,7 +174,17 @@ async def doubao_responses_search(
             body["thinking"] = {"type": "enabled"}
 
     merge_extra_body(
-        body, extra_body, {"model", "input", "tools", "stream", "max_tool_calls", "reasoning", "thinking"}
+        body,
+        extra_body,
+        {
+            "model",
+            "input",
+            "tools",
+            "stream",
+            "max_tool_calls",
+            "reasoning",
+            "thinking",
+        },
     )
     headers = build_headers(api_key, extra_headers)
 
