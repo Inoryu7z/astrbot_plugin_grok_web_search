@@ -84,7 +84,7 @@ def _load_astrbot_plugin_config() -> tuple[dict[str, Any], str]:
         return {}, "AstrBot data 目录未找到"
 
     config_path = os.path.join(
-        data_path, "config", "astrbot_plugin_grok_web_search.json"
+        data_path, "config", "astrbot_plugin_grok_web_search_Inoryu7z.json"
     )
     if not os.path.exists(config_path):
         return {}, f"AstrBot 插件配置文件不存在: {config_path}"
