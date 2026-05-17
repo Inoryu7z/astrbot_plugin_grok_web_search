@@ -10,6 +10,10 @@
   - quality_chain：填写提供商 ID，用于后台研究场景（如日程插件的风格研究）
   - 未配置链路时回退到 providers 原始顺序（完全向后兼容）
 - **_do_search() 新增 prefer_quality 参数**：默认 False（速度优先），传 True 时走质量优先链路
+- **豆包 reasoning_effort 配置**：providers 模板新增 reasoning_effort 字段（下拉选择 minimal/low/medium/high，默认 medium），控制豆包模型的思考深度
+
+### Changed
+- **插件重命名**：目录名从 `astrbot_plugin_grok_web_search` 改为 `astrbot_plugin_grok_web_search_Inoryu7z`
 
 
 ## [1.4.1] - 2026-05-10

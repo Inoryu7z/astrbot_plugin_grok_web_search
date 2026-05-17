@@ -61,7 +61,7 @@ from .tool.card_render import (
     set_logger as set_card_logger,
 )
 
-PLUGIN_NAME = "astrbot_plugin_grok_web_search"
+PLUGIN_NAME = "astrbot_plugin_grok_web_search_Inoryu7z"
 
 
 def _fmt_tokens(n: int) -> str:
