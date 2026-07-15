@@ -1199,6 +1199,7 @@ class GrokSearchPlugin(Star):
         event: AstrMessageEvent,
         query: str,
         image_urls: str = "",
+        prefer_quality: bool = False,
     ) -> str:
         """首选实时联网搜索工具。凡是涉及搜索、查证、最新信息、外部资料、网页/X 平台动态、报错排查等任务，必须优先调用本工具。
 
@@ -1218,6 +1219,18 @@ class GrokSearchPlugin(Star):
         - 搜索结果包含图片 URL 且用户要求发送图片→搜索完成后立即调用 grok_download_file 下载发送
         - 涉及训练数据截止日期之后的信息→必须调用本工具
 
+        链路选择原则（prefer_quality 参数）：
+        - 默认 False（速度优先链路 speed_chain），覆盖绝大多数即时搜索场景
+        - 仅当用户在当前对话中明确要求使用质量链路/高质量搜索时，才将 prefer_quality 设为 True
+        - 触发质量链路的明确信号（用户须主动表达，LLM 不得自行推断）：
+          - 用户直接说"用质量链/走质量链路/quality/高质量模式"
+          - 用户明确说"深度搜/高质量搜/认真搜/仔细查"等要求高质量搜索的表述
+        - 不可触发质量链路的情形：
+          - 用户只说"搜一下/查一下/帮我搜"等普通搜索请求→保持 False
+          - 用户表达"这个很重要/要查准"等模糊意图但未明确要求高质量→保持 False
+          - LLM 自主判断任务复杂度高但用户未表态→保持 False
+        - 若用户未明确表态，一律使用 False（速度链）。质量链路成本更高、耗时更长，必须由用户主动选择
+
         query 编写原则：
         - 使用详细的自然语言描述搜索意图，而非简短关键词
         - 好的 query 示例："2026年4月最新的Python 3.13正式版发布日期和新特性"
@@ -1227,6 +1240,7 @@ class GrokSearchPlugin(Star):
         Args:
                     query(string): 搜索查询内容，使用详细的自然语言描述搜索意图和所需信息，不要用搜索引擎语法（如 site:、OR、引号等）
                     image_urls(string): 可选，逗号分隔的图片 URL 或 base64:// 数据，用于基于图片内容的联网搜索
+                    prefer_quality(bool): 是否使用质量优先链路（quality_chain）。默认 False 走速度优先链路。仅当用户明确要求高质量/质量链路/深度搜索时设为 True，否则必须保持 False
         """
         images: list[str] = []
         if image_urls and isinstance(image_urls, str):
@@ -1257,7 +1271,9 @@ class GrokSearchPlugin(Star):
             logger.info(
                 f"[{PLUGIN_NAME}] grok_web_search tool: processing with {len(images)} image(s)"
             )
-        result = await self._do_search(query, use_retry=False, images=images or None)
+        result = await self._do_search(
+            query, use_retry=False, images=images or None, prefer_quality=prefer_quality
+        )
         return self._format_result_for_llm(result)
 
     @filter.llm_tool(name="grok_web_fetch")
