@@ -1,6 +1,15 @@
 # Changelog
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
+## [1.5.1] - 2026-07-16
+
+### Added
+- **LLM Tool 支持链路选择**：`grok_web_search` 工具新增 `prefer_quality` 布尔参数（默认 False），LLM 可根据用户意图选择速度链路或质量链路
+  - 默认 False 走速度优先链路（speed_chain），覆盖即时搜索场景
+  - 用户明确要求高质量/质量链路/深度搜索时，LLM 可设为 True 走质量优先链路（quality_chain）
+  - docstring 中明确了触发条件：仅当用户主动表达"用质量链/深度搜/高质量搜"等明确意图时才切换，普通搜索请求保持速度链
+  - 复用 v1.5.0 已有的 `_do_search(prefer_quality=)` 基础设施，无破坏性变更
+
 ## [1.5.0] - 2026-05-17
 
 ### Added
