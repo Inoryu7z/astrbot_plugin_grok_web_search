@@ -15,10 +15,12 @@
 ## 功能
 
 - `/grok` 指令 - 直接执行搜索，支持附带图片进行多模态搜索
-- LLM Tool (`grok_web_search`) - 供 LLM 自动调用的实时搜索工具，支持搜索网页和 X (Twitter) 平台
+- LLM Tool (`grok_web_search`) - 供 LLM 自动调用的实时搜索工具，支持搜索网页和 X (Twitter) 平台；v1.5.1 起支持 `prefer_quality` 参数切换速度/质量链路
 - LLM Tool (`grok_web_fetch`) - 网页内容抓取工具，将 URL 转为结构化 Markdown，优先使用豆包网页解析应用（支持图片提取），回退到 Grok 联网能力
+- LLM Tool (`grok_download_file`) - 文件下载并发送工具，支持图片和文档（PDF/Word/Excel 等），自动检测 Content-Type 修正文件类型
 - Skill 脚本 - 可安装到 skills 目录供 LLM 脚本调用，支持 `--image-files` 传入图片
 - 搜索结果图片卡片 - 基于 Pillow 纯本地渲染，面板式布局，支持日/夜自动主题
+- **双链路提供商路由**（v1.5.0） - `speed_chain`（速度优先）与 `quality_chain`（质量优先）独立配置，解决即时搜索与后台研究场景对提供商速度/质量需求冲突
 - **豆包搜索支持** - 在 providers 列表中添加火山方舟端点，自动识别并使用豆包 Responses API 进行联网搜索
 - **豆包网页解析** - 通过 Bot API 调用带网页解析插件的零代码应用，抓取网页内容并自动提取图片发送
 
@@ -38,6 +40,35 @@
 | `use_builtin_provider` | bool | 否 | 是否使用 AstrBot 自带供应商（默认: false） |
 | `provider` | string | 条件 | 选择已配置的 LLM 供应商（启用自带供应商时必填） |
 | `providers` | template_list | 条件 | 自定义提供商列表（使用自定义供应商时必填，按顺序故障转移） |
+
+### 自定义提供商字段（`providers` 模板）
+
+每个 provider 条目可配置以下字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `id` | string | 否 | 提供商唯一标识（v1.5.0 新增），用于在 `speed_chain` / `quality_chain` 中引用，如 `grok-fast`、`doubao-pro` |
+| `base_url` | string | 是 | API 端点 URL。Grok: `https://api.x.ai`；豆包: `https://ark.cn-beijing.volces.com`（会自动补全 API 路径） |
+| `api_key` | string | 是 | API 密钥 |
+| `model` | string | 否 | 模型名称（留空使用全局默认：grok-4-fast / doubao-seed-2-0-pro-260215） |
+| `fetch_bot_id` | string | 否 | 豆包网页解析应用ID（仅豆包），填写后网页抓取优先使用此应用 |
+| `reasoning_effort` | string | 否 | 思考强度（仅豆包，v1.5.0 新增）：`minimal`/`low`/`medium`/`high`，默认 `medium` |
+
+### 链路配置（v1.5.0）
+
+为解决即时搜索与后台研究场景对提供商速度/质量需求冲突，新增两条独立链路：
+
+| 配置项 | 类型 | 说明 |
+|--------|------|------|
+| `speed_chain` | template_list | 速度优先链路。填写 providers 中的提供商 ID，用于 `/grok` 指令和 LLM Tool（即时搜索场景） |
+| `quality_chain` | template_list | 质量优先链路。填写 providers 中的提供商 ID，用于后台研究场景（如日程插件的风格研究） |
+
+**回退规则**：
+- `speed_chain` 未配置 → 回退到 `providers` 列表原始顺序
+- `quality_chain` 未配置 → 回退到 `speed_chain`，再回退到 `providers` 列表原始顺序
+- 完全向后兼容：两条链路都未配置时，行为与 v1.4.x 一致
+
+**链路引用格式**：每个链路条目仅含 `provider_id` 字段，填写在 `providers` 中配置的唯一 ID。链路引用的 ID 不存在时会跳过并记录警告日志。
 
 ### 连接设置
 
@@ -110,10 +141,11 @@
 | `doubao_max_keyword` | int | 否 | 单轮搜索最大关键词数量(1-50)，默认: 5 |
 | `doubao_limit` | int | 否 | 单轮搜索返回最大结果条数(1-50)，默认: 10 |
 | `doubao_max_tool_calls` | int | 否 | 一次响应中工具调用最大轮次(1-10)，默认: 3 |
-| `doubao_enable_thinking` | bool | 否 | 是否开启思考模式（默认: false） |
+| `doubao_user_location` | JSON | 否 | 用户地理位置（优化地域相关搜索），格式 `{"country":"中国","region":"浙江","city":"杭州"}`，留空不启用 |
 | `doubao_max_images` | int | 否 | 网页解析时最大发送图片数量（0-10，默认: 3，0 表示不发送图片） |
 
 > 豆包提供商默认模型为 `doubao-seed-2-0-pro-260215`，可在 providers 列表中自定义。
+> 豆包思考深度通过 providers 模板中的 `reasoning_effort` 字段控制（`minimal`/`low`/`medium`/`high`，默认 `medium`），v1.5.0 起替代原 `doubao_enable_thinking`。
 
 ### 豆包网页解析设置
 
@@ -170,6 +202,11 @@
 
 每次搜索请求会自动注入当前时间上下文（日期、星期、时区），帮助 Grok 更好地处理时效性查询。
 
+**`prefer_quality` 参数（v1.5.1）**：`grok_web_search` 工具新增 `prefer_quality` 布尔参数（默认 `false`）：
+- `false`（默认）：走速度优先链路（`speed_chain`），覆盖绝大多数即时搜索场景
+- `true`：走质量优先链路（`quality_chain`），仅当用户**明确要求**"用质量链/深度搜/高质量搜"时才设为 `true`，普通搜索请求保持 `false`
+- 链路未配置时回退到 `providers` 列表原始顺序（完全向后兼容）
+
 ### Web Fetch
 
 `grok_web_fetch` 工具可抓取指定 URL 的网页内容并转为结构化 Markdown。优先使用豆包网页解析应用（如已配置 `fetch_bot_id`），支持自动提取网页图片发送；未配置时回退到 Grok 联网能力。
@@ -179,6 +216,21 @@
 "帮我看看 https://example.com 这个页面的内容"
 "搜俩洛丽塔裙衣服来"  # AI 搜索后自动抓取网页并提取图片
 ```
+
+### 文件下载（`grok_download_file`）
+
+v1.4.0 新增的 LLM Tool，用于下载指定 URL 的文件并发送给用户。典型场景是用户说"搜个XX图片发给我"——LLM 先调用 `grok_web_search` 获取图片 URL，再调用本工具下载发送。
+
+| 支持类型 | 行为 |
+|----------|------|
+| 图片（jpg/png/gif/webp/bmp/svg） | 直接发送图片消息（`file_image` → 失败时回退 `fromBytes`） |
+| 文档（pdf/doc/xls/ppt/zip 等） | 直接发送文件消息 |
+| 其他类型 | 通过 Content-Type 自动检测修正文件扩展名 |
+
+- 单文件大小限制：20MB
+- 下载到 `data/plugin_data/astrbot_plugin_grok_web_search_Inoryu7z/downloads/` 目录
+- 返回本地路径供后续工具引用（如代码执行器读取）
+- 支持 HTTP 代理（使用全局 `proxy` 配置）
 
 ### Skill
 
