@@ -53,13 +53,14 @@
           "reasoning_effort": {
             "type": "string",
             "description": "思考强度（仅豆包）",
-            "hint": "控制豆包模型的思考深度。minimal=不思考，low=轻度思考，medium=中度思考，high=深度思考。默认 medium",
+            "hint": "控制豆包模型的思考深度。minimal=不思考，low=轻度思考，medium=中度思考，high=深度思考。none=不传入思考强度参数（兼容不支持该参数的开源模型）。默认 medium",
             "default": "medium",
             "options": [
               "medium",
               "minimal",
               "low",
-              "high"
+              "high",
+              "none"
             ]
           }
         }
