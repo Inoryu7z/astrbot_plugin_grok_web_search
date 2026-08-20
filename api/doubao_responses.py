@@ -166,12 +166,14 @@ async def doubao_responses_search(
     if max_tool_calls is not None and 1 <= max_tool_calls <= 10:
         body["max_tool_calls"] = max_tool_calls
 
-    if reasoning_effort and reasoning_effort in ("minimal", "low", "medium", "high"):
+    if reasoning_effort in ("minimal", "low", "medium", "high"):
         body["reasoning"] = {"effort": reasoning_effort}
         if reasoning_effort == "minimal":
             body["thinking"] = {"type": "disabled"}
         else:
             body["thinking"] = {"type": "enabled"}
+    # reasoning_effort 为 none 或留空时，不传入 reasoning/thinking 参数，
+    # 以兼容不支持思考强度参数的开源模型
 
     merge_extra_body(
         body,

@@ -51,7 +51,7 @@ LLM 在需要实时信息时会自动调用搜索工具。以下用户消息都�
 | `api_key` | ✓ | API 密钥 |
 | `id` |  | 提供商唯一 ID（用于链路引用），如 `grok-fast`、`doubao-pro` |
 | `model` |  | 留空使用默认（grok-4-fast / doubao-seed-2-0-pro-260215） |
-| `reasoning_effort` |  | 豆包思考强度：`minimal`/`low`/`medium`/`high`，默认 `medium` |
+| `reasoning_effort` |  | 豆包思考强度：`minimal`/`low`/`medium`/`high`，`none`=不传入（兼容不支持该参数的开源模型），默认 `medium` |
 | `fetch_bot_id` |  | 豆包网页解析应用 ID（用于网页抓取） |
 
 > 也可使用 AstrBot 自带供应商（`use_builtin_provider: true`），但自定义 providers 支持多提供商故障转移和链路配置。
