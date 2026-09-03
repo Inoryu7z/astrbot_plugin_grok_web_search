@@ -142,6 +142,60 @@ class GrokSearchPlugin(Star):
             _llm_tools_registry.remove_func("grok_web_fetch")
             logger.info(f"[{PLUGIN_NAME}] 网页抓取未启用，已卸载 grok_web_fetch 工具")
 
+    def _find_token_router(self):
+        """跨插件查找 token_router 实例（需具备 record_storage_usage 方法）。"""
+        try:
+            stars = self.context.get_all_stars()
+        except Exception:
+            return None
+        for meta in stars or []:
+            p_id = str(getattr(meta, "id", "") or "")
+            p_name = str(getattr(meta, "name", "") or "")
+            root_dir_name = str(getattr(meta, "root_dir_name", "") or "")
+            if (
+                "token_router" not in p_id
+                and "token_router" not in p_name
+                and "token_router" not in root_dir_name
+            ):
+                continue
+            for attr in ("star_instance", "instance", "star_cls"):
+                candidate = getattr(meta, attr, None)
+                if candidate is not None and hasattr(candidate, "record_storage_usage"):
+                    return candidate
+        return None
+
+    def _report_token_usage(
+        self, provider_id: str, usage: dict | None, umo: str = ""
+    ) -> None:
+        """将搜索/抓取的 token 用量上报给 token_router。
+
+        优先走 record_plugin_usage：与聊天共享同一每日额度桶，合计到限时聊天照常顺延；
+        搜索自身不参与路由，仍使用配置的提供商。
+        """
+        if not provider_id:
+            return
+        if not isinstance(usage, dict):
+            return
+        try:
+            total_tokens = int(usage.get("total_tokens", 0) or 0)
+        except (ValueError, TypeError):
+            return
+        if total_tokens <= 0:
+            return
+        router = self._find_token_router()
+        if router is None:
+            return
+        try:
+            record = getattr(router, "record_plugin_usage", None)
+            if record is not None:
+                record(provider_id, total_tokens, umo=umo)
+            else:
+                router.record_storage_usage(provider_id, total_tokens)
+        except Exception as e:
+            logger.warning(
+                f"[{PLUGIN_NAME}] 上报 token 用量失败 provider={provider_id}: {e}"
+            )
+
     def _init_fonts(self):
         """Initialize card rendering fonts (runs in background)."""
         logger.info(f"[{PLUGIN_NAME}] 正在后台初始化卡片渲染字体 ...")
@@ -267,6 +321,7 @@ class GrokSearchPlugin(Star):
         retryable_status_codes: set[int] | None,
         images: list[str] | None,
         proxy: str | None,
+        umo: str = "",
     ) -> dict:
         """对单个自定义 HTTP 提供商执行搜索。"""
         base_url = str(provider_cfg.get("base_url") or "")
@@ -357,6 +412,7 @@ class GrokSearchPlugin(Star):
         result["provider_name"] = provider_cfg.get("name")
         result["provider_base_url"] = base_url
         result["provider_model"] = model
+        self._report_token_usage(model, result.get("usage"), umo=umo)
         return result
 
     async def _run_custom_provider_fetch(
@@ -366,6 +422,7 @@ class GrokSearchPlugin(Star):
         url: str,
         timeout: float,
         proxy: str | None,
+        umo: str = "",
     ) -> dict:
         """对单个自定义 HTTP 提供商执行网页抓取。"""
         base_url = str(provider_cfg.get("base_url") or "")
@@ -405,6 +462,11 @@ class GrokSearchPlugin(Star):
         result["provider_index"] = provider_cfg.get("index")
         result["provider_name"] = provider_cfg.get("name")
         result["provider_base_url"] = base_url
+        self._report_token_usage(
+            str(provider_cfg.get("model") or base_url),
+            result.get("usage"),
+            umo=umo,
+        )
         return result
 
     async def initialize(self):
@@ -640,6 +702,7 @@ class GrokSearchPlugin(Star):
         use_retry: bool = False,
         images: list[str] | None = None,
         prefer_quality: bool = False,
+        umo: str = "",
     ) -> dict:
         """Execute a search.
 
@@ -721,6 +784,7 @@ class GrokSearchPlugin(Star):
                             "completion_tokens": llm_resp.usage.output,
                             "total_tokens": llm_resp.usage.total,
                         }
+                    self._report_token_usage(configured_provider_id, usage, umo=umo)
                     parsed = self._try_parse_json_response(text)
                     if parsed is not None:
                         content = str(parsed.get("content", ""))
@@ -814,6 +878,7 @@ class GrokSearchPlugin(Star):
                     retryable_status_codes=retryable_status_codes,
                     images=images,
                     proxy=proxy,
+                    umo=umo,
                 )
             except Exception as e:
                 err = f"{provider_name}: API 调用异常: {e}"
@@ -1133,11 +1198,13 @@ class GrokSearchPlugin(Star):
                 "IMPORTANT: Respond in Chinese. Do NOT use Markdown formatting in the content field - use plain text only. "
                 "Keep proper nouns and names in their original language."
             )
+        umo = str(getattr(event, "unified_msg_origin", "") or "")
         result = await self._do_search(
             query,
             system_prompt=cmd_system_prompt,
             use_retry=True,
             images=images or None,
+            umo=umo,
         )
         event.should_call_llm(True)
         use_image = self.config.get("render_as_image", False) and self._card_fonts_ready
@@ -1271,8 +1338,13 @@ class GrokSearchPlugin(Star):
             logger.info(
                 f"[{PLUGIN_NAME}] grok_web_search tool: processing with {len(images)} image(s)"
             )
+        umo = str(getattr(event, "unified_msg_origin", "") or "")
         result = await self._do_search(
-            query, use_retry=False, images=images or None, prefer_quality=prefer_quality
+            query,
+            use_retry=False,
+            images=images or None,
+            prefer_quality=prefer_quality,
+            umo=umo,
         )
         return self._format_result_for_llm(result)
 
@@ -1353,6 +1425,7 @@ class GrokSearchPlugin(Star):
                     url=url,
                     timeout=timeout,
                     proxy=proxy,
+                    umo=str(getattr(event, "unified_msg_origin", "") or ""),
                 )
             except Exception as e:
                 err = f"{provider_name}: API 调用异常: {e}"
