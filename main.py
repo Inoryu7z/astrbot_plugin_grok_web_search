@@ -1278,7 +1278,7 @@ class GrokSearchPlugin(Star):
         - 技术问题：报错信息、API 用法、官方文档、GitHub issue
         - 外部平台内容：网页、博客、X（Twitter）、产品页面
         - 带图搜索：用户发送图片，或要求结合图片内容联网判断
-- 用户想要的是图库里已经存过的照片（bot 自己以前的、或收进来的别人的照片 / cos 照）→ 用图库检索工具 search_wardrobe_image；本工具接触不到本地图库
+        - 用户想要的是图库里已经存过的照片（bot 自己以前的、或收进来的别人的照片 / cos 照）→ 用图库检索工具 search_wardrobe_image；本工具接触不到本地图库
 
         调用原则：
         - 只要存在"需要搜索"的成分，就优先调用本工具，不要仅凭记忆作答
@@ -1305,9 +1305,9 @@ class GrokSearchPlugin(Star):
         - 差的 query 示例："python 3.13"
 
         Args:
-                    query(string): 搜索查询内容，使用详细的自然语言描述搜索意图和所需信息，不要用搜索引擎语法（如 site:、OR、引号等）
-                    image_urls(string): 可选，逗号分隔的图片 URL 或 base64:// 数据，用于基于图片内容的联网搜索
-                    prefer_quality(bool): 是否使用质量优先链路（quality_chain）。默认 False 走速度优先链路。仅当用户明确要求高质量/质量链路/深度搜索时设为 True，否则必须保持 False
+            query(string): 搜索查询内容，使用详细的自然语言描述搜索意图和所需信息，不要用搜索引擎语法（如 site:、OR、引号等）
+            image_urls(string): 可选，逗号分隔的图片 URL 或 base64:// 数据，用于基于图片内容的联网搜索
+            prefer_quality(bool): 是否使用质量优先链路（quality_chain）。默认 False 走速度优先链路。仅当用户明确要求高质量/质量链路/深度搜索时设为 True，否则必须保持 False
         """
         images: list[str] = []
         if image_urls and isinstance(image_urls, str):
